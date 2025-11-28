@@ -1,0 +1,15 @@
+# Python venv
+backend/.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# VS Code
+.vscode/
+
+# General
+.env
+
+# macOS
+.DS_Store
