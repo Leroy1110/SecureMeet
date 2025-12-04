@@ -11,5 +11,8 @@ __pycache__/
 # General
 .env
 
+# Database
+*.db
+
 # macOS
 .DS_Store
