@@ -9,4 +9,4 @@ class User(Base):
     email = Column(String(255), unique=True, index=True, nullable=False)
     username = Column(String(50), unique=True, index=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
-    created_at = Column(DateTime, default=func.now())
+    created_at = Column(DateTime, nullable=False, default=func.now())
