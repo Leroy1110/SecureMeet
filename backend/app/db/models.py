@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
 from sqlalchemy.sql import func
 from app.db.base import Base
 
@@ -10,3 +10,15 @@ class User(Base):
     username = Column(String(50), unique=True, index=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
     created_at = Column(DateTime, nullable=False, default=func.now())
+
+class Room(Base):
+    __tablename__ = "rooms"
+
+    id = Column(Integer, primary_key=True, index=True)
+    room_code = Column(String(100), unique=True, index=True, nullable=False)
+    host_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    password_hash = Column(String, nullable=False)
+    max_participants = Column(Integer, nullable=False, default=10)
+    status = Column(String(30), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    expires_at = Column(DateTime, nullable=False)
