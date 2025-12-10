@@ -23,3 +23,14 @@ class Room(Base):
     created_at = Column(DateTime, nullable=False, default=func.now())
     expires_at = Column(DateTime, nullable=False)
     encryption_key_encrypted = Column(String, nullable=False)
+
+class RoomMember(Base):
+    __tablename__ = "room_members"
+
+    id = Column(Integer, primary_key=True, index=True)
+    room_id = Column(Integer, ForeignKey("rooms.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    role = Column(String, nullable=False)
+    state = Column(String, nullable=False)
+    joined_at = Column(DateTime, nullable=False, default=func.now())
+    left_at = Column(DateTime, nullable=True)
