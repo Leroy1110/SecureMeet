@@ -1,0 +1,21 @@
+# Python venv
+backend/.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# VS Code
+.vscode/
+
+# General
+.env
+
+# Database
+*.db
+
+# macOS
+.DS_Store
+
+# AI file
+PROJECT_CONTEXT.md
