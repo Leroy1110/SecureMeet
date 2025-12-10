@@ -22,3 +22,4 @@ class Room(Base):
     status = Column(String(30), nullable=False)
     created_at = Column(DateTime, nullable=False, default=func.now())
     expires_at = Column(DateTime, nullable=False)
+    encryption_key_encrypted = Column(String, nullable=False)
