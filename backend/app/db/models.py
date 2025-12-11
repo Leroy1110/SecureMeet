@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
 from sqlalchemy.sql import func
 from app.db.base import Base
 
@@ -34,3 +34,14 @@ class RoomMember(Base):
     state = Column(String, nullable=False)
     joined_at = Column(DateTime, nullable=True)
     left_at = Column(DateTime, nullable=True)
+
+class Message(Base):
+    __tablename__ = "messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    room_id = Column(Integer, ForeignKey("rooms.id"), nullable=False, index=True)
+    from_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    to_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    content_encrypted = Column(Text, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    msg_type = Column(String, nullable=False)
