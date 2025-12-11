@@ -28,9 +28,9 @@ class RoomMember(Base):
     __tablename__ = "room_members"
 
     id = Column(Integer, primary_key=True, index=True)
-    room_id = Column(Integer, ForeignKey("rooms.id"), nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    room_id = Column(Integer, ForeignKey("rooms.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     role = Column(String, nullable=False)
     state = Column(String, nullable=False)
-    joined_at = Column(DateTime, nullable=False, default=func.now())
+    joined_at = Column(DateTime, nullable=True)
     left_at = Column(DateTime, nullable=True)
