@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
 from sqlalchemy.sql import func
 from app.db.base import Base
 
@@ -23,3 +23,35 @@ class Room(Base):
     created_at = Column(DateTime, nullable=False, default=func.now())
     expires_at = Column(DateTime, nullable=False)
     encryption_key_encrypted = Column(String, nullable=False)
+
+class RoomMember(Base):
+    __tablename__ = "room_members"
+
+    id = Column(Integer, primary_key=True, index=True)
+    room_id = Column(Integer, ForeignKey("rooms.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    role = Column(String, nullable=False)
+    state = Column(String, nullable=False)
+    joined_at = Column(DateTime, nullable=True)
+    left_at = Column(DateTime, nullable=True)
+
+class Message(Base):
+    __tablename__ = "messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    room_id = Column(Integer, ForeignKey("rooms.id"), nullable=False, index=True)
+    from_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    to_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    content_encrypted = Column(Text, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    msg_type = Column(String, nullable=False)
+
+class EventLog(Base):
+    __tablename__ = "events_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    room_id = Column(Integer, ForeignKey("rooms.id"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    event_type = Column(String, nullable=False)
+    data_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=func.now())
