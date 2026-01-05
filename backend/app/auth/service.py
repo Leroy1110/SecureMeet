@@ -42,3 +42,15 @@ def register_user(db: Session, email: str , username: str, password: str) -> Use
     except SQLAlchemyError:
         db.rollback()
         raise RuntimeError("Failed to register user")
+
+def authenticate_user(db: Session, email: str, password: str) -> User | None:
+    email = email_validation(email=email)
+
+    login_user = db.query(User).filter(User.email == email).first()
+    if login_user is None:
+        return None
+    
+    if verify_password(password, login_user.password_hash):
+        return login_user
+    
+    return None
