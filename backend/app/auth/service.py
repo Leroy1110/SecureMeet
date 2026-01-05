@@ -54,3 +54,12 @@ def authenticate_user(db: Session, email: str, password: str) -> User | None:
         return login_user
     
     return None
+
+def login_user(db: Session, email: str, password: str) -> Token:
+    user = authenticate_user(db=db, email=email, password=password)
+    if not user:
+        raise ValueError("Invalid email or password")
+    
+    access_token = create_access_token(data={"user_id": user.id, "email": user.email, "username": user.username})
+    user_token = Token(access_token=access_token)
+    return user_token
