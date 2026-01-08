@@ -23,3 +23,27 @@ def get_token_from_header(authorization: str) -> str:
     
     token_value = token_list[1].strip()
     return token_value
+
+def get_current_user(db: Session = Depends(get_db), authorization: str = Header(default=None)) -> User:
+    if authorization is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing or invalid Authorization header")
+    
+    try:
+        token_value = get_token_from_header(authorization)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
+    
+    try:
+        payload = decode_access_token(token_value)
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+    user_id: int = payload.get("user_id")
+    if user_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
+    
+    user_query = db.query(User).filter(User.id == user_id).first()
+    if user_query is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+
+    return user_query
