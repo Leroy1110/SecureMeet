@@ -3,6 +3,8 @@ from sqlalchemy.orm import Session
 from app.auth.schemas import UserRegistrationRequest, UserResponse, UserLoginRequest, Token
 from app.auth.service import register_user, login_user
 from app.db.session import get_db
+from app.auth.deps import get_current_user
+from app.db.models import User
 
 router = APIRouter()
 
@@ -34,3 +36,7 @@ def login(payload: UserLoginRequest, db: Session = Depends(get_db)):
     
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication failed")
+
+@router.get("/me", response_model=UserResponse, status_code=status.HTTP_200_OK)
+def get_me(current_user: User = Depends(get_current_user)) -> User:
+    return current_user
