@@ -1,3 +1,4 @@
+from cryptography.fernet import Fernet
+
 def generate_room_key() -> bytes:
-    #the function return ferent key
-    pass
+    return Fernet.generate_key()
