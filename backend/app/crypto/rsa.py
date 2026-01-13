@@ -1,6 +1,7 @@
+import base64
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey, RSAPublicKey
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives import serialization, hashes
 from pathlib import Path
 
 KEY_DIR = Path(__file__).resolve().parent.parent.parent / ".keys"
@@ -49,10 +50,29 @@ def load_or_create_rsa_keypair() -> tuple[RSAPrivateKey, RSAPublicKey]:
     return private_key, public_key
 
 
-"""
+
 def encrypt_room_key(room_key: bytes) -> str:
-    pass
+    if not isinstance(room_key, (bytes, bytearray)):
+        raise TypeError("room_key must be bytes")
+    
+    if len(room_key) > 190:
+        raise ValueError("room_key too long to encrypt with RSA")
+
+    room_key = bytes(room_key)
+    public_key = load_or_create_rsa_keypair()[1]
+    encrypted_key = public_key.encrypt(
+        room_key,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
+
+    b64_bytes = base64.b64encode(encrypted_key)
+    result_encrypted_key = b64_bytes.decode('ascii')
+
+    return result_encrypted_key
 
 def decrypt_room_key(encrypted_key: str) -> bytes:
     pass
-"""
