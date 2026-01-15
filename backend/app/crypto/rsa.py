@@ -75,4 +75,21 @@ def encrypt_room_key(room_key: bytes) -> str:
     return result_encrypted_key
 
 def decrypt_room_key(encrypted_key: str) -> bytes:
-    pass
+    if not isinstance(encrypted_key, str):
+        raise TypeError("encrypted_key must be string")
+    
+    b64_bytes = encrypted_key.encode('ascii')
+    cipher_bytes = base64.b64decode(b64_bytes)
+
+    private_key = load_or_create_rsa_keypair()[0]
+
+    room_key = private_key.decrypt(
+        cipher_bytes,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
+
+    return room_key
