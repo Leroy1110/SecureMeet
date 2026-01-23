@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from app.db.models import Room, RoomMember
 from app.auth.security import hash_password, verify_password, create_room_token
 from app.crypto.symmetric import generate_room_key
@@ -18,7 +18,7 @@ def create_room(db: Session, host_user_id: int) -> tuple[Room, str]:
     room_key = generate_room_key()
     encrypted_room_key = encrypt_room_key(room_key)
 
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=2)
+    expires_at = datetime.utcnow() + timedelta(hours=2)
 
     new_room = Room(
         room_code=room_code,
@@ -34,7 +34,7 @@ def create_room(db: Session, host_user_id: int) -> tuple[Room, str]:
         user_id=host_user_id,
         role="host",
         state="active",
-        joined_at=datetime.now(timezone.utc)
+        joined_at=datetime.utcnow()
     )
 
     try:
@@ -61,7 +61,7 @@ def join_room(db: Session, user_id: int, room_code: str, room_password: str) -> 
     if room.status != "active":
         raise ValueError("Room is not active")
 
-    if room.expires_at < datetime.now(timezone.utc):
+    if room.expires_at < datetime.utcnow():
         raise ValueError("Room has expired")
     
     if not verify_password(room_password, room.password_hash):
@@ -83,7 +83,7 @@ def join_room(db: Session, user_id: int, room_code: str, room_password: str) -> 
         user_id=user_id,
         role="participant",
         state="waiting",
-        joined_at=datetime.now(timezone.utc)
+        joined_at=datetime.utcnow()
     )
 
     try:
