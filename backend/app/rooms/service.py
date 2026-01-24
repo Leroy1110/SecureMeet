@@ -7,7 +7,7 @@ from app.crypto.symmetric import generate_room_key
 from app.crypto.rsa import encrypt_room_key
 import secrets
 
-def create_room(db: Session, host_user_id: int) -> tuple[Room, str]:
+def create_room(db: Session, host_user_id: int) -> tuple[Room, str, str]:
     room_code = secrets.token_urlsafe(8)
     while db.query(Room).filter_by(room_code=room_code).first():
         room_code = secrets.token_urlsafe(8)
@@ -48,7 +48,15 @@ def create_room(db: Session, host_user_id: int) -> tuple[Room, str]:
         db.refresh(new_room)
         db.refresh(host_member)
 
-        return (new_room, room_password)
+        host_room_jwt = create_room_token({
+            "room_id": host_member.room_id,
+            "room_code": new_room.room_code,
+            "user_id": host_member.user_id,
+            "role": "host",
+            "state": "active"
+        })
+
+        return (new_room, room_password, host_room_jwt)
     except SQLAlchemyError as e:
         db.rollback()
         raise RuntimeError("Failed to create room") from e

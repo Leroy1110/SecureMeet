@@ -5,6 +5,7 @@ class RoomCreateResponse(BaseModel):
     room_code: str
     room_password: str
     expires_at: datetime
+    room_jwt: str
 
 class RoomJoinRequest(BaseModel):
     room_code: str

@@ -12,11 +12,12 @@ router = APIRouter()
 @router.post("/", response_model=RoomCreateResponse, status_code=status.HTTP_201_CREATED)
 def room_creation(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     try:
-        new_room, room_password = create_room(db=db, host_user_id=current_user.id)
+        new_room, room_password, host_jwt = create_room(db=db, host_user_id=current_user.id)
         return RoomCreateResponse(
             room_code=new_room.room_code,
             room_password=room_password,
-            expires_at=new_room.expires_at
+            expires_at=new_room.expires_at,
+            room_jwt=host_jwt
         )
     except SQLAlchemyError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
