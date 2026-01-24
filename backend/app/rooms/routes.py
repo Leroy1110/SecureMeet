@@ -1,6 +1,5 @@
 from fastapi import APIRouter, status, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import SQLAlchemyError
 from app.db.session import get_db
 from app.db.models import User
 from app.auth.deps import get_current_user
@@ -19,7 +18,7 @@ def room_creation(db: Session = Depends(get_db), current_user: User = Depends(ge
             expires_at=new_room.expires_at,
             room_jwt=host_jwt
         )
-    except SQLAlchemyError as e:
+    except RuntimeError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 @router.post("/join", response_model=RoomJoinResponse, status_code=status.HTTP_200_OK)
