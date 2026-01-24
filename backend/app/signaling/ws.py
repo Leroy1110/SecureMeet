@@ -11,7 +11,8 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Missing token")
         return
     
-    if encoded_token.strip() == "":
+    encoded_token = encoded_token.strip()
+    if encoded_token == "":
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Missing token")
         return
 
@@ -27,8 +28,27 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str):
         return
 
     if room_code == payload_room_code:
+        role = payload.get("role")
+        if role is None:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="payload doesn't have role")
+            return
+        
+        state = payload.get("state")
+        if state is None:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="payload doesn't have state")
+            return
+        
         await websocket.accept()
-        await websocket.send_text("connected")
+        
+        if role == "host":
+            await websocket.send_text("host connected")
+        elif state == "waiting":
+            await websocket.send_text("waiting for approval")
+        elif state == "active":
+            await websocket.send_text("connected")
+        else:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="invalid role/state")
+            return
     else:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="room_code doesn't match")
         return
