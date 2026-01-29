@@ -1,8 +1,11 @@
 from fastapi import APIRouter, WebSocket, status
 from jose import JWTError
 from app.auth.security import decode_access_token as decode_room_token
+from app.signaling.room_manager import RoomManager
 
 router = APIRouter()
+
+room_manager: RoomManager = RoomManager()
 
 @router.websocket("/ws/rooms/{room_code}")
 async def websocket_endpoint(websocket: WebSocket, room_code: str):
@@ -49,6 +52,14 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str):
         else:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="invalid role/state")
             return
+        
+        room_manager.add_connection(room_code, websocket, role=role, state=state)
+
+        try:
+            while True:
+                await websocket.receive()
+        finally:
+            room_manager.remove_connection(room_code, websocket)
     else:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="room_code doesn't match")
         return
