@@ -2,6 +2,7 @@ from fastapi import APIRouter, WebSocket, status
 from jose import JWTError
 from app.auth.security import decode_access_token as decode_room_token
 from app.signaling.room_manager import RoomManager
+from fastapi.websockets import WebSocketDisconnect
 
 router = APIRouter()
 
@@ -41,23 +42,56 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str):
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="payload doesn't have state")
             return
         
+        allowed_roles = {"host", "participant"}
+        allowed_states = {"waiting", "active"}
+        
+        if role not in allowed_roles:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid role")
+            return
+        
+        if state not in allowed_states:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid state")
+            return
         await websocket.accept()
+
+        room_manager.add_connection(room_code, websocket, role=role, state=state)
         
         if role == "host":
-            await websocket.send_text("host connected")
+            await websocket.send_json({
+                "type": "system.connected",
+                "payload": {
+                    "room_code": room_code,
+                    "role": role,
+                    "state": "active"
+                }
+            })
         elif state == "waiting":
-            await websocket.send_text("waiting for approval")
+            await websocket.send_json({
+                "type": "system.connected",
+                "payload": {
+                    "room_code": room_code,
+                    "role": role,
+                    "state": "waiting"
+                }
+            })
         elif state == "active":
-            await websocket.send_text("connected")
+            await websocket.send_json({
+                "type": "system.connected",
+                "payload": {
+                    "room_code": room_code,
+                    "role": role,
+                    "state": "active"
+                }
+            })
         else:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="invalid role/state")
             return
-        
-        room_manager.add_connection(room_code, websocket, role=role, state=state)
 
         try:
             while True:
                 await websocket.receive()
+        except WebSocketDisconnect:
+            pass
         finally:
             room_manager.remove_connection(room_code, websocket)
     else:
