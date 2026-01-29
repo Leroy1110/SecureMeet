@@ -42,6 +42,11 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str):
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="payload doesn't have state")
             return
         
+        user_id = payload.get("user_id")
+        if user_id is None:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="payload doesn't have user id")
+            return
+        
         allowed_roles = {"host", "participant"}
         allowed_states = {"waiting", "active"}
         
