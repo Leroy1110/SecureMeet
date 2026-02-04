@@ -47,6 +47,8 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str):
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="payload doesn't have user id")
             return
         
+        user_id = int(user_id)
+        
         allowed_roles = {"host", "participant"}
         allowed_states = {"waiting", "active"}
         
@@ -59,7 +61,7 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str):
             return
         await websocket.accept()
 
-        room_manager.add_connection(room_code, websocket, role=role, state=state)
+        room_manager.add_connection(room_code, websocket, role=role, state=state, user_id=user_id)
         
         if role == "host":
             await websocket.send_json({
@@ -68,6 +70,15 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str):
                     "room_code": room_code,
                     "role": role,
                     "state": "active"
+                }
+            })
+
+            waiting_list = room_manager.get_or_create_room(room_code=room_code).waiting_ws
+            await websocket.send_json({
+                "type": "waiting.list",
+                "payload": {
+                    "room_code": room_code,
+                    "users": list(waiting_list.keys())
                 }
             })
         elif state == "waiting":
@@ -98,7 +109,7 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str):
         except WebSocketDisconnect:
             pass
         finally:
-            room_manager.remove_connection(room_code, websocket)
+            room_manager.remove_connection(room_code, websocket, user_id=user_id)
     else:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="room_code doesn't match")
         return
