@@ -90,6 +90,17 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str):
                     "state": "waiting"
                 }
             })
+
+            if room_manager.rooms[room_code].host_ws is not None and room_manager.rooms[room_code].host_user_id is not None:
+                try:
+                    await room_manager.rooms[room_code].host_ws.send_json({
+                        "type": "waiting.add",
+                        "payload": {
+                            "user_id": user_id
+                        }
+                    })
+                finally:
+                    pass
         elif state == "active":
             await websocket.send_json({
                 "type": "system.connected",
