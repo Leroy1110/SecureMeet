@@ -62,6 +62,7 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str):
         await websocket.accept()
 
         room_manager.add_connection(room_code, websocket, role=role, state=state, user_id=user_id)
+        room_state = room_manager.get_or_create_room(room_code=room_code)
         
         if role == "host":
             await websocket.send_json({
@@ -73,7 +74,7 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str):
                 }
             })
 
-            waiting_list = room_manager.get_or_create_room(room_code=room_code).waiting_ws
+            waiting_list = room_state.waiting_ws
             await websocket.send_json({
                 "type": "waiting.list",
                 "payload": {
@@ -91,9 +92,9 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str):
                 }
             })
 
-            if room_manager.rooms[room_code].host_ws is not None and room_manager.rooms[room_code].host_user_id is not None:
+            if room_state.host_ws is not None and room_state.host_user_id is not None:
                 try:
-                    await room_manager.rooms[room_code].host_ws.send_json({
+                    await room_state.host_ws.send_json({
                         "type": "waiting.add",
                         "payload": {
                             "user_id": user_id
