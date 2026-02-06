@@ -59,3 +59,34 @@ class RoomManager:
         
         if room_state.host_ws is None and not room_active and not room_waiting:
             del self.rooms[room_code]
+    
+    def approve_user(self, room_code: str, user_id: int) -> WebSocket | None:
+        if room_code not in self.rooms:
+            return
+        
+        room_state: RoomState = self.rooms[room_code]
+        room_active: dict[int, WebSocket] = room_state.active_ws
+        room_waiting: dict[int, WebSocket] = room_state.waiting_ws
+
+        if user_id in room_waiting:
+            room_active[user_id] = room_waiting[user_id]
+            room_waiting.pop(user_id)
+
+            return room_active[user_id]
+        
+        return None
+    
+    def reject_user(self, room_code: str, user_id: int) -> WebSocket | None:
+        if room_code not in self.rooms:
+            return
+        
+        room_state: RoomState = self.rooms[room_code]
+        room_waiting: dict[int, WebSocket] = room_state.waiting_ws
+
+        if user_id in room_waiting:
+            ws_remove: WebSocket = room_waiting[user_id]
+            room_waiting.pop(user_id)
+
+            return ws_remove
+        
+        return None

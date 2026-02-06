@@ -100,7 +100,7 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str):
                             "user_id": user_id
                         }
                     })
-                finally:
+                except WebSocketDisconnect:
                     pass
         elif state == "active":
             await websocket.send_json({
@@ -117,7 +117,87 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str):
 
         try:
             while True:
-                await websocket.receive()
+                data: dict = await websocket.receive_json()
+
+                message_type: str | None = data.get("type")
+                message_payload = data.get("payload")
+
+                if not isinstance(message_type, str):
+                    await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="type must be string")
+                    return
+
+                if not isinstance(message_payload, dict):
+                    await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="payload must be dict")
+                    return
+
+                if "waiting.approve" == message_type or "waiting.reject" == message_type:
+                    if role == "host" and room_state.host_user_id == user_id:
+                        try:
+                            payload_user_id: int = int(message_payload.get("user_id"))
+                        except (TypeError, ValueError):
+                            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="invalid user_id in payload")
+                            return
+
+                        if "waiting.approve" == message_type:
+                            user_approved = room_manager.approve_user(room_code=room_code, user_id=payload_user_id)
+
+                            if isinstance(user_approved, WebSocket):
+                                await user_approved.send_json({
+                                    "type": "waiting.approved",
+                                    "payload": {}
+                                })
+
+                                await user_approved.send_json({
+                                    "type": "system.state_change",
+                                    "payload": {
+                                        "room_code": room_code,
+                                        "role": "participant",
+                                        "state": "active"
+                                    }
+                                })
+
+                                await websocket.send_json({
+                                    "type": "waiting.removed",
+                                    "payload": {
+                                        "user_id": payload_user_id
+                                    }
+                                })
+                            else:
+                                await websocket.send_json({
+                                    "type": "error",
+                                    "payload": {
+                                        "message": "user not in waiting"
+                                    }
+                                })
+                        
+                        if "waiting.reject" == message_type:
+                            user_rejected =room_manager.reject_user(room_code=room_code, user_id=payload_user_id)
+
+                            if isinstance(user_rejected, WebSocket):
+                                await user_rejected.send_json({
+                                    "type": "waiting.rejected",
+                                    "payload": {}
+                                })
+
+                                await user_rejected.close(code=status.WS_1000_NORMAL_CLOSURE, reason="rejected by host")
+
+                                await websocket.send_json({
+                                    "type": "waiting.removed",
+                                    "payload": {
+                                        "user_id": payload_user_id
+                                    }
+                                })
+                            else:
+                                await websocket.send_json({
+                                    "type": "error",
+                                    "payload": {
+                                        "message": "user not in waiting"
+                                    }
+                                })
+                    
+                    else:
+                        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="only host can approve or reject")
+                        return
         except WebSocketDisconnect:
             pass
         finally:
