@@ -7,7 +7,7 @@ from app.crypto.symmetric import generate_room_key
 from app.crypto.rsa import encrypt_room_key
 import secrets
 
-def create_room(db: Session, host_user_id: int) -> tuple[Room, str]:
+def create_room(db: Session, host_user_id: int) -> tuple[Room, str, str]:
     room_code = secrets.token_urlsafe(8)
     while db.query(Room).filter_by(room_code=room_code).first():
         room_code = secrets.token_urlsafe(8)
@@ -48,7 +48,15 @@ def create_room(db: Session, host_user_id: int) -> tuple[Room, str]:
         db.refresh(new_room)
         db.refresh(host_member)
 
-        return (new_room, room_password)
+        host_room_jwt = create_room_token({
+            "room_id": host_member.room_id,
+            "room_code": new_room.room_code,
+            "user_id": host_member.user_id,
+            "role": "host",
+            "state": "active"
+        })
+
+        return (new_room, room_password, host_room_jwt)
     except SQLAlchemyError as e:
         db.rollback()
         raise RuntimeError("Failed to create room") from e
@@ -103,3 +111,29 @@ def join_room(db: Session, user_id: int, room_code: str, room_password: str) -> 
     except SQLAlchemyError as e:
         db.rollback()
         raise RuntimeError("Failed to join room") from e
+
+def update_user_state(db: Session, room_id: int, user_id: int, new_state: str, left_at: datetime | None = None) -> bool:
+    room_member = db.query(RoomMember).filter(RoomMember.room_id == room_id, RoomMember.user_id == user_id).first()
+
+    if not room_member:
+        raise ValueError("RoomMember not found")
+    
+    if room_member.state != "waiting":
+        raise ValueError("User is not in waiting state")
+    
+    if new_state not in ["active", "rejected"]:
+        raise ValueError("Invalid state")
+
+    room_member.state = new_state
+    if left_at:
+        room_member.left_at = left_at
+    
+    try:
+        db.add(room_member)
+        db.commit()
+        db.refresh(room_member)
+        
+        return True
+    except SQLAlchemyError:
+        db.rollback()
+        raise RuntimeError("Failed to change user state")
