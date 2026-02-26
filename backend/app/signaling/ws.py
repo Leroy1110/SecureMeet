@@ -29,7 +29,12 @@ async def handler_approve(
     try:
         payload_user_id: int = int(payload.get("user_id"))
     except (TypeError, ValueError):
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="invalid user_id in payload")
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "invalid user_id in payload"
+            }
+        })
         return
     
     if payload_user_id not in room_state.waiting_ws:
@@ -74,15 +79,6 @@ async def handler_approve(
             "payload": {}
         })
 
-        await user_approved.send_json({
-            "type": "system.state_change",
-            "payload": {
-                "room_code": room_code,
-                "role": "participant",
-                "state": "active"
-            }
-        })
-
         await websocket.send_json({
             "type": "waiting.removed",
             "payload": {
@@ -90,12 +86,18 @@ async def handler_approve(
             }
         })
 
-        await websocket.send_json({
+        message_active_add = {
             "type": "active.add",
             "payload": {
                 "user_id": payload_user_id
             }
-        })
+        }
+
+        for ws_active in room_state.active_ws.values():
+            try:
+                await ws_active.send_json(message_active_add)
+            except Exception:
+                pass
 
 async def handler_reject(
     websocket: WebSocket,
@@ -114,7 +116,12 @@ async def handler_reject(
     try:
         payload_user_id: int = int(payload.get("user_id"))
     except (TypeError, ValueError):
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="invalid user_id in payload")
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "invalid user_id in payload"
+            }
+        })
         return
     
     if payload_user_id not in room_state.waiting_ws:
