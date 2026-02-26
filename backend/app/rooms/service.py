@@ -111,3 +111,29 @@ def join_room(db: Session, user_id: int, room_code: str, room_password: str) -> 
     except SQLAlchemyError as e:
         db.rollback()
         raise RuntimeError("Failed to join room") from e
+
+def update_user_state(db: Session, room_id: int, user_id: int, new_state: str, left_at: datetime | None = None) -> bool:
+    room_member = db.query(RoomMember).filter(RoomMember.room_id == room_id, RoomMember.user_id == user_id).first()
+
+    if not room_member:
+        raise ValueError("RoomMember not found")
+    
+    if room_member.state != "waiting":
+        raise ValueError("User is not in waiting state")
+    
+    if new_state not in ["active", "rejected"]:
+        raise ValueError("Invalid state")
+
+    room_member.state = new_state
+    if left_at:
+        room_member.left_at = left_at
+    
+    try:
+        db.add(room_member)
+        db.commit()
+        db.refresh(room_member)
+        
+        return True
+    except SQLAlchemyError:
+        db.rollback()
+        raise RuntimeError("Failed to change user state")
