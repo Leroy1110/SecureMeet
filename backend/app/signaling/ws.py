@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.rooms.service import update_user_state
 from datetime import datetime
+from app.rooms.messages_service import save_message
 
 router = APIRouter()
 
@@ -231,6 +232,14 @@ async def handler_chat_send(
         }
     }
 
+    db_message = save_message(
+        db=db,
+        room_id=room_id,
+        from_user_id=sender_user_id,
+        to_user_id=to_user_id,
+        content_plain=content,
+        msg_type="chat"
+    )
     if to_user_id is None:
         for ws_active in room_state.active_ws.values():
             try:
