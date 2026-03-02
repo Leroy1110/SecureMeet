@@ -8,10 +8,62 @@ from app.db.session import get_db
 from app.rooms.service import update_user_state
 from datetime import datetime
 from app.rooms.messages_service import save_message
+from app.db.models import Room, RoomMember
 
 router = APIRouter()
 
 room_manager: RoomManager = RoomManager()
+
+def validate_room_for_ws_connect(db: Session, *, room_code_path: str, token_payload: dict) -> tuple[int, int, str, str]:
+    payload_room_code: str = token_payload.get("room_code")
+    if payload_room_code is None:
+        raise ValueError("payload missing room_code")
+    
+    payload_room_id = token_payload.get("room_id")
+    if payload_room_id is None:
+        raise ValueError("payload missing room_id")
+    
+    try:
+        payload_room_id = int(payload_room_id)
+    except (ValueError, TypeError):
+        raise ValueError("invalid room_id in payload")
+    
+    payload_user_id = token_payload.get("user_id")
+    if payload_user_id is None:
+        raise ValueError("payload missing user_id")
+    
+    try:
+        payload_user_id = int(payload_user_id)
+    except (ValueError, TypeError):
+        raise ValueError("invalid user_id in payload")
+    
+    if payload_room_code != room_code_path:
+        raise ValueError("room_code in payload doesn't match path")
+    
+    room = db.query(Room).filter(Room.id == payload_room_id, Room.room_code == payload_room_code).first()
+    if room is None:
+        raise ValueError("room not found")
+    
+    if room.status != "active":
+        raise ValueError("room is not active")
+    
+    if room.expires_at < datetime.utcnow():
+        raise ValueError("room has expired")
+    
+    room_member = db.query(RoomMember).filter(RoomMember.room_id == payload_room_id, RoomMember.user_id == payload_user_id).first()
+    if room_member is None:
+        raise ValueError("room member not found")
+    
+    if room_member.state not in {"waiting", "active"}:
+        raise ValueError("member state not allowed")
+    
+    if (room_member.role == "host" and room.host_id != payload_user_id) or (room_member.role != "host" and room.host_id == payload_user_id):
+        raise ValueError("host role mismatch")
+    
+    if room_member.role not in {"host", "participant"}:
+        raise ValueError("member role not allowed")
+    
+    return payload_room_id, payload_user_id, room_member.role, room_member.state
 
 async def handler_approve(
     websocket: WebSocket,
@@ -373,6 +425,18 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, db: Session =
         if state not in allowed_states:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid state")
             return
+        
+        try:
+            room_id_db, user_id_db, role_db, state_db = validate_room_for_ws_connect(db=db, room_code_path=room_code, token_payload=payload)
+            room_id = room_id_db
+            user_id = user_id_db
+            role = role_db
+            state = state_db
+
+        except ValueError as e:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason=str(e))
+            return
+
         await websocket.accept()
 
         room_manager.add_connection(room_code, websocket, role=role, state=state, user_id=user_id)
