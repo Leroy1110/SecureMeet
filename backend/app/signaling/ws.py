@@ -99,6 +99,42 @@ async def handler_approve(
         })
         return
     
+    room = db.query(Room).filter(Room.id == room_id).first()
+    if room is None:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "room not found"
+            }
+        })
+        return
+    
+    count_active = db.query(RoomMember).filter(RoomMember.room_id == room_id, RoomMember.state == "active").count()
+    if room.status != "active":
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "room is not active"
+            }
+        })
+        return
+    elif room.expires_at < datetime.utcnow():
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "room has expired"
+            }
+        })
+        return
+    elif count_active >= room.max_participants:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "room is full"
+            }
+        })
+        return
+
     try:
         user_status = update_user_state(
             db=db,
@@ -106,7 +142,17 @@ async def handler_approve(
             user_id=payload_user_id,
             new_state="active"
         )
-    except (RuntimeError, ValueError):
+    
+    except ValueError as e:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": str(e)
+            }
+        })
+        return
+
+    except Exception:
         await websocket.send_json({
             "type": "error",
             "payload": {
