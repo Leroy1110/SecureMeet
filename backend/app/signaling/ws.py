@@ -200,6 +200,7 @@ async def handler_chat_send(
         return
     
     to_user_id = payload.get("to_user_id")
+    recipient_ws: WebSocket | None = None
     if to_user_id is not None:
         try:
             to_user_id = int(to_user_id)
@@ -208,6 +209,19 @@ async def handler_chat_send(
                 "type": "error",
                 "payload": {
                     "message": "to_user_id must be int or null"
+                }
+            })
+            return
+
+        if to_user_id == room_state.host_user_id and room_state.host_ws is not None:
+            recipient_ws = room_state.host_ws
+        elif to_user_id in room_state.active_ws:
+            recipient_ws = room_state.active_ws[to_user_id]
+        else:
+            await websocket.send_json({
+                "type": "error",
+                "payload": {
+                    "message": "user not active"
                 }
             })
             return
@@ -220,7 +234,34 @@ async def handler_chat_send(
             }
         })
         return
-    
+
+    try:
+        db_message = save_message(
+            db=db,
+            room_id=room_id,
+            from_user_id=sender_user_id,
+            to_user_id=to_user_id,
+            content_plain=content,
+            msg_type="chat"
+        )
+    except Exception:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "failed to persist chat message"
+            }
+        })
+        return
+
+    if db_message.id is None or db_message.created_at is None:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "invalid persisted message metadata"
+            }
+        })
+        return
+
     message = {
         "type": "chat.message",
         "payload": {
@@ -232,14 +273,6 @@ async def handler_chat_send(
         }
     }
 
-    db_message = save_message(
-        db=db,
-        room_id=room_id,
-        from_user_id=sender_user_id,
-        to_user_id=to_user_id,
-        content_plain=content,
-        msg_type="chat"
-    )
     if to_user_id is None:
         for ws_active in room_state.active_ws.values():
             try:
@@ -253,20 +286,8 @@ async def handler_chat_send(
                 pass
     else:
         try:
-            if to_user_id == room_state.host_user_id and room_state.host_ws is not None:
-                await room_state.host_ws.send_json(message)
-            
-            elif to_user_id in room_state.active_ws:
-                await room_state.active_ws[to_user_id].send_json(message)
-            
-            else:
-                await websocket.send_json({
-                    "type": "error",
-                    "payload": {
-                        "message": "user not active"
-                    }
-                })
-                return
+            if recipient_ws is not None:
+                await recipient_ws.send_json(message)
 
             if to_user_id != sender_user_id:
                 await websocket.send_json(message)
