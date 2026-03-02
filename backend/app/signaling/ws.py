@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.rooms.service import update_user_state
 from datetime import datetime
+from app.rooms.messages_service import save_message
 
 router = APIRouter()
 
@@ -93,11 +94,12 @@ async def handler_approve(
             }
         }
 
-        for ws_active in room_state.active_ws.values():
-            try:
-                await ws_active.send_json(message_active_add)
-            except Exception:
-                pass
+        for user_id, ws_active in room_state.active_ws.items():
+            if user_id != payload_user_id:
+                try:
+                    await ws_active.send_json(message_active_add)
+                except Exception:
+                    pass
 
 async def handler_reject(
     websocket: WebSocket,
@@ -176,9 +178,133 @@ async def handler_reject(
             }
         })
 
+
+async def handler_chat_send(
+    websocket: WebSocket,
+    room_state: RoomState,
+    room_code: str,
+    room_id: int,
+    sender_user_id: int,
+    sender_role: str,
+    payload: dict,
+    db: Session
+):
+    content = payload.get("content")
+    if not isinstance(content, str) or content.strip() == "":
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "content must be string and not empty"
+            }
+        })
+        return
+    
+    to_user_id = payload.get("to_user_id")
+    recipient_ws: WebSocket | None = None
+    if to_user_id is not None:
+        try:
+            to_user_id = int(to_user_id)
+        except (TypeError, ValueError):
+            await websocket.send_json({
+                "type": "error",
+                "payload": {
+                    "message": "to_user_id must be int or null"
+                }
+            })
+            return
+
+        if to_user_id == room_state.host_user_id and room_state.host_ws is not None:
+            recipient_ws = room_state.host_ws
+        elif to_user_id in room_state.active_ws:
+            recipient_ws = room_state.active_ws[to_user_id]
+        else:
+            await websocket.send_json({
+                "type": "error",
+                "payload": {
+                    "message": "user not active"
+                }
+            })
+            return
+    
+    if sender_role != "host" and sender_user_id not in room_state.active_ws:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "only active users can send messages"
+            }
+        })
+        return
+
+    try:
+        db_message = save_message(
+            db=db,
+            room_id=room_id,
+            from_user_id=sender_user_id,
+            to_user_id=to_user_id,
+            content_plain=content,
+            msg_type="chat"
+        )
+    except Exception:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "failed to persist chat message"
+            }
+        })
+        return
+
+    if db_message.id is None or db_message.created_at is None:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "invalid persisted message metadata"
+            }
+        })
+        return
+
+    message = {
+        "type": "chat.message",
+        "payload": {
+            "room_code": room_code,
+            "from_user_id": sender_user_id,
+            "to_user_id": to_user_id,
+            "content": content,
+            "created_at": datetime.utcnow().isoformat()
+        }
+    }
+
+    if to_user_id is None:
+        for ws_active in room_state.active_ws.values():
+            try:
+                await ws_active.send_json(message)
+            except Exception:
+                pass
+        if room_state.host_ws is not None:
+            try:
+                await room_state.host_ws.send_json(message)
+            except Exception:
+                pass
+    else:
+        try:
+            if recipient_ws is not None:
+                await recipient_ws.send_json(message)
+
+            if to_user_id != sender_user_id:
+                await websocket.send_json(message)
+
+        except Exception:
+            await websocket.send_json({
+                "type": "error",
+                "payload": {
+                    "message": "failed to send message to user"
+                }
+            })
+
+
 MESSAGE_HANDLERS = {
     "waiting.approve": handler_approve,
     "waiting.reject": handler_reject,
+    "chat.send": handler_chat_send
 }
 
 @router.websocket("/ws/rooms/{room_code}")
