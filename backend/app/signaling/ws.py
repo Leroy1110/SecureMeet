@@ -5,7 +5,7 @@ from app.signaling.room_manager import RoomManager, RoomState
 from fastapi.websockets import WebSocketDisconnect
 from sqlalchemy.orm import Session
 from app.db.session import get_db
-from app.rooms.service import update_user_state
+from app.rooms.service import update_user_state, mark_member_left
 from datetime import datetime
 from app.rooms.messages_service import save_message
 from app.db.models import Room, RoomMember
@@ -606,6 +606,44 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, db: Session =
         except WebSocketDisconnect:
             pass
         finally:
+            was_waiting = (user_id in room_state.waiting_ws)
+            was_active = (user_id in room_state.active_ws)
+
+            try:
+                mark_member_left(db=db, room_id=room_id, user_id=user_id)
+            except Exception:
+                pass
+
+            if was_waiting:
+                if room_state.host_ws is not None:
+                    try:
+                        await room_state.host_ws.send_json({
+                            "type": "waiting.removed",
+                            "payload": {
+                                "user_id": user_id
+                            }
+                        })
+                    except Exception:
+                        pass
+            elif was_active:
+                message_active_remove = {
+                    "type": "active.remove",
+                    "payload": {
+                        "user_id": user_id
+                    }
+                }
+                for ws_id, ws_active in room_state.active_ws.items():
+                    if ws_id != user_id:
+                        try:
+                            await ws_active.send_json(message_active_remove)
+                        except Exception:
+                            pass
+                if room_state.host_ws is not None:
+                    try:
+                        await room_state.host_ws.send_json(message_active_remove)
+                    except Exception:
+                        pass
+
             room_manager.remove_connection(room_code, websocket, user_id=user_id)
     else:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="room_code doesn't match")

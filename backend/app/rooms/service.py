@@ -137,3 +137,21 @@ def update_user_state(db: Session, room_id: int, user_id: int, new_state: str, l
     except SQLAlchemyError:
         db.rollback()
         raise RuntimeError("Failed to change user state")
+
+def mark_member_left(db: Session, room_id: int, user_id: int) -> None:
+    room_member = db.query(RoomMember).filter(RoomMember.room_id == room_id, RoomMember.user_id == user_id).first()
+
+    if room_member is None:
+        return
+    
+    if room_member.state not in ["left", "kicked", "rejected"]:
+        room_member.state = "left"
+        room_member.left_at = datetime.utcnow()
+
+        try:
+            db.add(room_member)
+            db.commit()
+            db.refresh(room_member)
+        except SQLAlchemyError:
+            db.rollback()
+            return
