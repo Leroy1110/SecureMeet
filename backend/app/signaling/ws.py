@@ -152,6 +152,12 @@ async def handler_approve(
                     await ws_active.send_json(message_active_add)
                 except Exception:
                     pass
+        
+        if room_state.host_ws is not None:
+            try:
+                await room_state.host_ws.send_json(message_active_add)
+            except Exception:
+                pass
 
 async def handler_reject(
     websocket: WebSocket,
@@ -471,6 +477,15 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, db: Session =
                 "payload": {
                     "room_code": room_code,
                     "users": list(waiting_list.keys())
+                }
+            })
+
+            active_list = room_state.active_ws
+            await websocket.send_json({
+                "type": "active.list",
+                "payload": {
+                    "room_code": room_code,
+                    "users": list(active_list.keys())
                 }
             })
         elif state == "waiting":
