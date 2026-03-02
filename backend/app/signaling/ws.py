@@ -439,6 +439,19 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, db: Session =
 
         await websocket.accept()
 
+        old_ws = room_manager.replace_connection(room_code=room_code, user_id=user_id, new_ws=websocket, role=role)
+        if old_ws is not None:
+            try:
+                await old_ws.send_json({
+                    "type": "system.disconnected",
+                    "payload": {
+                        "reason": "new connection replaced the old one"
+                    }
+                })
+                await old_ws.close(code=status.WS_1000_NORMAL_CLOSURE, reason="new connection replaced the old one")
+            except Exception:
+                pass
+
         room_manager.add_connection(room_code, websocket, role=role, state=state, user_id=user_id)
         room_state = room_manager.get_or_create_room(room_code=room_code)
         
