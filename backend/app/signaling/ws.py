@@ -5,13 +5,65 @@ from app.signaling.room_manager import RoomManager, RoomState
 from fastapi.websockets import WebSocketDisconnect
 from sqlalchemy.orm import Session
 from app.db.session import get_db
-from app.rooms.service import update_user_state
+from app.rooms.service import update_user_state, mark_member_left, mark_member_kicked
 from datetime import datetime
 from app.rooms.messages_service import save_message
+from app.db.models import Room, RoomMember
 
 router = APIRouter()
 
 room_manager: RoomManager = RoomManager()
+
+def validate_room_for_ws_connect(db: Session, *, room_code_path: str, token_payload: dict) -> tuple[int, int, str, str]:
+    payload_room_code: str = token_payload.get("room_code")
+    if payload_room_code is None:
+        raise ValueError("payload missing room_code")
+    
+    payload_room_id = token_payload.get("room_id")
+    if payload_room_id is None:
+        raise ValueError("payload missing room_id")
+    
+    try:
+        payload_room_id = int(payload_room_id)
+    except (ValueError, TypeError):
+        raise ValueError("invalid room_id in payload")
+    
+    payload_user_id = token_payload.get("user_id")
+    if payload_user_id is None:
+        raise ValueError("payload missing user_id")
+    
+    try:
+        payload_user_id = int(payload_user_id)
+    except (ValueError, TypeError):
+        raise ValueError("invalid user_id in payload")
+    
+    if payload_room_code != room_code_path:
+        raise ValueError("room_code in payload doesn't match path")
+    
+    room = db.query(Room).filter(Room.id == payload_room_id, Room.room_code == payload_room_code).first()
+    if room is None:
+        raise ValueError("room not found")
+    
+    if room.status != "active":
+        raise ValueError("room is not active")
+    
+    if room.expires_at < datetime.utcnow():
+        raise ValueError("room has expired")
+    
+    room_member = db.query(RoomMember).filter(RoomMember.room_id == payload_room_id, RoomMember.user_id == payload_user_id).first()
+    if room_member is None:
+        raise ValueError("room member not found")
+    
+    if room_member.state not in {"waiting", "active"}:
+        raise ValueError("member state not allowed")
+    
+    if (room_member.role == "host" and room.host_id != payload_user_id) or (room_member.role != "host" and room.host_id == payload_user_id):
+        raise ValueError("host role mismatch")
+    
+    if room_member.role not in {"host", "participant"}:
+        raise ValueError("member role not allowed")
+    
+    return payload_room_id, payload_user_id, room_member.role, room_member.state
 
 async def handler_approve(
     websocket: WebSocket,
@@ -47,6 +99,42 @@ async def handler_approve(
         })
         return
     
+    room = db.query(Room).filter(Room.id == room_id).first()
+    if room is None:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "room not found"
+            }
+        })
+        return
+    
+    count_active = db.query(RoomMember).filter(RoomMember.room_id == room_id, RoomMember.state == "active").count()
+    if room.status != "active":
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "room is not active"
+            }
+        })
+        return
+    elif room.expires_at < datetime.utcnow():
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "room has expired"
+            }
+        })
+        return
+    elif count_active >= room.max_participants:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "room is full"
+            }
+        })
+        return
+
     try:
         user_status = update_user_state(
             db=db,
@@ -54,7 +142,17 @@ async def handler_approve(
             user_id=payload_user_id,
             new_state="active"
         )
-    except (RuntimeError, ValueError):
+    
+    except ValueError as e:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": str(e)
+            }
+        })
+        return
+
+    except Exception:
         await websocket.send_json({
             "type": "error",
             "payload": {
@@ -100,6 +198,12 @@ async def handler_approve(
                     await ws_active.send_json(message_active_add)
                 except Exception:
                     pass
+        
+        if room_state.host_ws is not None:
+            try:
+                await room_state.host_ws.send_json(message_active_add)
+            except Exception:
+                pass
 
 async def handler_reject(
     websocket: WebSocket,
@@ -300,11 +404,101 @@ async def handler_chat_send(
                 }
             })
 
+async def handler_kick(
+    websocket: WebSocket,
+    room_state: RoomState,
+    room_code: str,
+    room_id: int,
+    sender_user_id: int,
+    sender_role: str,
+    payload: dict,
+    db: Session
+):
+    if sender_role != "host" or room_state.host_user_id != sender_user_id:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="only host can kick")
+        return
+    
+    try:
+        payload_user_id: int = int(payload.get("user_id"))
+    except (TypeError, ValueError):
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "invalid user_id in payload"
+            }
+        })
+        return
+    
+    if payload_user_id == sender_user_id:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "host cannot be kicked"
+            }
+        })
+        return
+    
+    mark_member_kicked(db=db, room_id=room_id, user_id=payload_user_id)
+
+    res = room_manager.remove_user_and_get_ws(room_code=room_code, user_id=payload_user_id)
+    if res is None:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "user not connected"
+            }
+        })
+        return
+    result_state_ws, result_ws = res
+    
+    try:
+        await result_ws.send_json({
+            "type": "system.kicked",
+            "payload": {}
+        })
+        await result_ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="kicked by host")
+    except Exception:
+        pass
+
+    if result_state_ws == "waiting":
+        if room_state.host_ws is not None:
+            try:
+                await room_state.host_ws.send_json({
+                    "type": "waiting.removed",
+                    "payload": {
+                        "user_id": payload_user_id
+                    }
+                })
+            except Exception:
+                pass
+        return
+
+    elif result_state_ws == "active":
+        message_active_remove = {
+            "type": "active.remove",
+            "payload": {
+                "user_id": payload_user_id
+            }
+        }
+        for user_id, ws_active in room_state.active_ws.items():
+            if user_id != payload_user_id:
+                try:
+                    await ws_active.send_json(message_active_remove)
+                except Exception:
+                    pass
+        
+        if room_state.host_ws is not None:
+            try:
+                await room_state.host_ws.send_json(message_active_remove)
+            except Exception:
+                pass
+        return
 
 MESSAGE_HANDLERS = {
     "waiting.approve": handler_approve,
     "waiting.reject": handler_reject,
-    "chat.send": handler_chat_send
+    "chat.send": handler_chat_send,
+    "member.kick": handler_kick
 }
 
 @router.websocket("/ws/rooms/{room_code}")
@@ -373,7 +567,32 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, db: Session =
         if state not in allowed_states:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid state")
             return
+        
+        try:
+            room_id_db, user_id_db, role_db, state_db = validate_room_for_ws_connect(db=db, room_code_path=room_code, token_payload=payload)
+            room_id = room_id_db
+            user_id = user_id_db
+            role = role_db
+            state = state_db
+
+        except ValueError as e:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason=str(e))
+            return
+
         await websocket.accept()
+
+        old_ws = room_manager.replace_connection(room_code=room_code, user_id=user_id, new_ws=websocket, role=role)
+        if old_ws is not None:
+            try:
+                await old_ws.send_json({
+                    "type": "system.disconnected",
+                    "payload": {
+                        "reason": "new connection replaced the old one"
+                    }
+                })
+                await old_ws.close(code=status.WS_1000_NORMAL_CLOSURE, reason="new connection replaced the old one")
+            except Exception:
+                pass
 
         room_manager.add_connection(room_code, websocket, role=role, state=state, user_id=user_id)
         room_state = room_manager.get_or_create_room(room_code=room_code)
@@ -394,6 +613,15 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, db: Session =
                 "payload": {
                     "room_code": room_code,
                     "users": list(waiting_list.keys())
+                }
+            })
+
+            active_list = room_state.active_ws
+            await websocket.send_json({
+                "type": "active.list",
+                "payload": {
+                    "room_code": room_code,
+                    "users": list(active_list.keys())
                 }
             })
         elif state == "waiting":
@@ -468,6 +696,44 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, db: Session =
         except WebSocketDisconnect:
             pass
         finally:
+            was_waiting = (user_id in room_state.waiting_ws)
+            was_active = (user_id in room_state.active_ws)
+
+            try:
+                mark_member_left(db=db, room_id=room_id, user_id=user_id)
+            except Exception:
+                pass
+
+            if was_waiting:
+                if room_state.host_ws is not None:
+                    try:
+                        await room_state.host_ws.send_json({
+                            "type": "waiting.removed",
+                            "payload": {
+                                "user_id": user_id
+                            }
+                        })
+                    except Exception:
+                        pass
+            elif was_active:
+                message_active_remove = {
+                    "type": "active.remove",
+                    "payload": {
+                        "user_id": user_id
+                    }
+                }
+                for ws_id, ws_active in room_state.active_ws.items():
+                    if ws_id != user_id:
+                        try:
+                            await ws_active.send_json(message_active_remove)
+                        except Exception:
+                            pass
+                if room_state.host_ws is not None:
+                    try:
+                        await room_state.host_ws.send_json(message_active_remove)
+                    except Exception:
+                        pass
+
             room_manager.remove_connection(room_code, websocket, user_id=user_id)
     else:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="room_code doesn't match")
