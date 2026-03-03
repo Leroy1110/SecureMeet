@@ -111,3 +111,19 @@ class RoomManager:
             elif user_id in room_state.active_ws:
                 old_ws = room_state.active_ws.pop(user_id)
                 return old_ws
+    
+    def remove_user_and_get_ws(self, room_code: str, user_id: int) -> tuple[str, WebSocket] | None:
+        if room_code not in self.rooms:
+            return None
+        
+        room_state: RoomState = self.rooms[room_code]
+
+        if user_id in room_state.waiting_ws:
+            ws_remove: WebSocket = room_state.waiting_ws.pop(user_id)
+            return ("waiting", ws_remove)
+        
+        elif user_id in room_state.active_ws:
+            ws_remove: WebSocket = room_state.active_ws.pop(user_id)
+            return ("active", ws_remove)
+        
+        return None

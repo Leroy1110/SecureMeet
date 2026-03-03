@@ -155,3 +155,21 @@ def mark_member_left(db: Session, room_id: int, user_id: int) -> None:
         except SQLAlchemyError:
             db.rollback()
             return
+
+def mark_member_kicked(db: Session, room_id: int, user_id: int) -> None:
+    room_member = db.query(RoomMember).filter(RoomMember.room_id == room_id, RoomMember.user_id == user_id).first()
+
+    if room_member is None:
+        return
+    
+    if room_member.state not in ["left", "kicked", "rejected"]:
+        room_member.state = "kicked"
+        room_member.left_at = datetime.utcnow()
+
+        try:
+            db.add(room_member)
+            db.commit()
+            db.refresh(room_member)
+        except SQLAlchemyError:
+            db.rollback()
+            return

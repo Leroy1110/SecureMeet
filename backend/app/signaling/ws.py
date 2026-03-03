@@ -5,7 +5,7 @@ from app.signaling.room_manager import RoomManager, RoomState
 from fastapi.websockets import WebSocketDisconnect
 from sqlalchemy.orm import Session
 from app.db.session import get_db
-from app.rooms.service import update_user_state, mark_member_left
+from app.rooms.service import update_user_state, mark_member_left, mark_member_kicked
 from datetime import datetime
 from app.rooms.messages_service import save_message
 from app.db.models import Room, RoomMember
@@ -404,11 +404,101 @@ async def handler_chat_send(
                 }
             })
 
+async def handler_kick(
+    websocket: WebSocket,
+    room_state: RoomState,
+    room_code: str,
+    room_id: int,
+    sender_user_id: int,
+    sender_role: str,
+    payload: dict,
+    db: Session
+):
+    if sender_role != "host" or room_state.host_user_id != sender_user_id:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="only host can kick")
+        return
+    
+    try:
+        payload_user_id: int = int(payload.get("user_id"))
+    except (TypeError, ValueError):
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "invalid user_id in payload"
+            }
+        })
+        return
+    
+    if payload_user_id == sender_user_id:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "host cannot be kicked"
+            }
+        })
+        return
+    
+    mark_member_kicked(db=db, room_id=room_id, user_id=payload_user_id)
+
+    res = room_manager.remove_user_and_get_ws(room_code=room_code, user_id=payload_user_id)
+    if res is None:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "user not connected"
+            }
+        })
+        return
+    result_state_ws, result_ws = res
+    
+    try:
+        await result_ws.send_json({
+            "type": "system.kicked",
+            "payload": {}
+        })
+        await result_ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="kicked by host")
+    except Exception:
+        pass
+
+    if result_state_ws == "waiting":
+        if room_state.host_ws is not None:
+            try:
+                await room_state.host_ws.send_json({
+                    "type": "waiting.removed",
+                    "payload": {
+                        "user_id": payload_user_id
+                    }
+                })
+            except Exception:
+                pass
+        return
+
+    elif result_state_ws == "active":
+        message_active_remove = {
+            "type": "active.remove",
+            "payload": {
+                "user_id": payload_user_id
+            }
+        }
+        for user_id, ws_active in room_state.active_ws.items():
+            if user_id != payload_user_id:
+                try:
+                    await ws_active.send_json(message_active_remove)
+                except Exception:
+                    pass
+        
+        if room_state.host_ws is not None:
+            try:
+                await room_state.host_ws.send_json(message_active_remove)
+            except Exception:
+                pass
+        return
 
 MESSAGE_HANDLERS = {
     "waiting.approve": handler_approve,
     "waiting.reject": handler_reject,
-    "chat.send": handler_chat_send
+    "chat.send": handler_chat_send,
+    "member.kick": handler_kick
 }
 
 @router.websocket("/ws/rooms/{room_code}")
