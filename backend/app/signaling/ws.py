@@ -9,6 +9,7 @@ from app.rooms.service import update_user_state, mark_member_left, mark_member_k
 from datetime import datetime
 from app.rooms.messages_service import save_message
 from app.db.models import Room, RoomMember
+from app.logging.audit import log_event
 
 router = APIRouter()
 
@@ -173,6 +174,17 @@ async def handler_approve(
             })
             return
         
+        log_event(
+            db=db,
+            event_type="APPROVE",
+            room_id=room_id,
+            user_id=sender_user_id,
+            data={
+                "room_code": room_code,
+                "target_user_id": payload_user_id
+            }
+        )
+
         await user_approved.send_json({
             "type": "waiting.approved",
             "payload": {}
@@ -268,6 +280,17 @@ async def handler_reject(
             })
             return
         
+        log_event(
+            db=db,
+            event_type="REJECT",
+            room_id=room_id,
+            user_id=sender_user_id,
+            data={
+                "room_code": room_code,
+                "target_user_id": payload_user_id
+            }
+        )
+
         await user_rejected.send_json({
             "type": "waiting.rejected",
             "payload": {}
@@ -460,6 +483,17 @@ async def handler_kick(
     except Exception:
         pass
 
+    log_event(
+        db=db,
+        event_type="KICK",
+        room_id=room_id,
+        user_id=sender_user_id,
+        data={
+            "room_code": room_code,
+            "target_user_id": payload_user_id
+        }
+    )
+
     if result_state_ws == "waiting":
         if room_state.host_ws is not None:
             try:
@@ -506,55 +540,155 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, db: Session =
     encoded_token = websocket.query_params.get("token")
     if encoded_token is None:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Missing token")
+        log_event(
+            db=db,
+            event_type="WS_CONNECT_FAIL",
+            room_id=None,
+            user_id=None,
+            data= {
+                "reason": "missing token",
+                "room_code": room_code
+            }
+        )
         return
     
     encoded_token = encoded_token.strip()
     if encoded_token == "":
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Missing token")
+        log_event(
+            db=db,
+            event_type="WS_CONNECT_FAIL",
+            room_id=None,
+            user_id=None,
+            data= {
+                "reason": "missing token",
+                "room_code": room_code
+            }
+        )
         return
 
     try:
         payload = decode_room_token(encoded_token)
     except JWTError:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="unable to decode token")
+        log_event(
+            db=db,
+            event_type="WS_CONNECT_FAIL",
+            room_id=None,
+            user_id=None,
+            data= {
+                "reason": "unable to decode token",
+                "room_code": room_code
+            }
+        )
         return
     
     payload_room_code: str = payload.get("room_code")
     if payload_room_code is None:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="unable to get room_code from payload")
+        log_event(
+            db=db,
+            event_type="WS_CONNECT_FAIL",
+            room_id=None,
+            user_id=None,
+            data= {
+                "reason": "unable to get room_code from payload",
+                "room_code": room_code
+            }
+        )
         return
     
     room_id = payload.get("room_id")
     if room_id is None:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="payload doesn't have room id")
+        log_event(
+            db=db,
+            event_type="WS_CONNECT_FAIL",
+            room_id=None,
+            user_id=None,
+            data= {
+                "reason": "payload doesn't have room id",
+                "room_code": room_code
+            }
+        )
         return
     
     try:
         room_id = int(room_id)
     except (ValueError, TypeError):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="invalid room id in payload")
+        log_event(
+            db=db,
+            event_type="WS_CONNECT_FAIL",
+            room_id=None,
+            user_id=None,
+            data= {
+                "reason": "invalid room id in payload",
+                "room_code": room_code
+            }
+        )
         return
 
     if room_code == payload_room_code:
         role = payload.get("role")
         if role is None:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="payload doesn't have role")
+            log_event(
+                db=db,
+                event_type="WS_CONNECT_FAIL",
+                room_id=room_id,
+                user_id=None,
+                data= {
+                    "reason": "payload doesn't have role",
+                    "room_code": room_code
+                }
+            )
             return
         
         state = payload.get("state")
         if state is None:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="payload doesn't have state")
+            log_event(
+                db=db,
+                event_type="WS_CONNECT_FAIL",
+                room_id=room_id,
+                user_id=None,
+                data= {
+                    "reason": "payload doesn't have state",
+                    "room_code": room_code
+                }
+            )
             return
         
         user_id = payload.get("user_id")
         if user_id is None:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="payload doesn't have user id")
+            log_event(
+                db=db,
+                event_type="WS_CONNECT_FAIL",
+                room_id=room_id,
+                user_id=None,
+                data= {
+                    "reason": "payload doesn't have user id",
+                    "room_code": room_code
+                }
+            )
             return
         
         try:
             user_id = int(user_id)
         except (ValueError, TypeError):
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="invalid user id in payload")
+            log_event(
+                db=db,
+                event_type="WS_CONNECT_FAIL",
+                room_id=room_id,
+                user_id=None,
+                data= {
+                    "reason": "invalid user id in payload",
+                    "room_code": room_code
+                }
+            )
             return
         
         allowed_roles = {"host", "participant"}
@@ -562,10 +696,30 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, db: Session =
         
         if role not in allowed_roles:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid role")
+            log_event(
+                db=db,
+                event_type="WS_CONNECT_FAIL",
+                room_id=room_id,
+                user_id=user_id,
+                data= {
+                    "reason": "invalid role in payload",
+                    "room_code": room_code
+                }
+            )
             return
         
         if state not in allowed_states:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid state")
+            log_event(
+                db=db,
+                event_type="WS_CONNECT_FAIL",
+                room_id=room_id,
+                user_id=user_id,
+                data= {
+                    "reason": "invalid state in payload",
+                    "room_code": room_code
+                }
+            )
             return
         
         try:
@@ -577,9 +731,30 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, db: Session =
 
         except ValueError as e:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason=str(e))
+            log_event(
+                db=db,
+                event_type="WS_CONNECT_FAIL",
+                room_id=room_id,
+                user_id=user_id,
+                data= {
+                    "reason": str(e),
+                    "room_code": room_code
+                }
+            )
             return
 
         await websocket.accept()
+        log_event(
+            db=db,
+            event_type="WS_CONNECT_SUCCESS",
+            room_id=room_id,
+            user_id=user_id,
+            data= {
+                "room_code": room_code,
+                "role": role,
+                "state": state
+            }
+        )
 
         old_ws = room_manager.replace_connection(room_code=room_code, user_id=user_id, new_ws=websocket, role=role)
         if old_ws is not None:
@@ -634,6 +809,16 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, db: Session =
                 }
             })
 
+            log_event(
+                db=db,
+                event_type="JOIN_REQUEST",
+                room_id=room_id,
+                user_id=user_id,
+                data= {
+                    "room_code": room_code
+                }
+            )
+
             if room_state.host_ws is not None and room_state.host_user_id is not None:
                 try:
                     await room_state.host_ws.send_json({
@@ -655,6 +840,16 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, db: Session =
             })
         else:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="invalid role/state")
+            log_event(
+                db=db,
+                event_type="WS_CONNECT_FAIL",
+                room_id=room_id,
+                user_id=user_id,
+                data= {
+                    "reason": "invalid role/state",
+                    "room_code": room_code
+                }
+            )
             return
 
         try:
@@ -703,6 +898,21 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, db: Session =
                 mark_member_left(db=db, room_id=room_id, user_id=user_id)
             except Exception:
                 pass
+            
+            try:
+                log_event(
+                    db=db,
+                    event_type="LEAVE",
+                    room_id=room_id,
+                    user_id=user_id,
+                    data= {
+                        "room_code": room_code,
+                        "was_waiting": was_waiting,
+                        "was_active": was_active
+                    }
+                )
+            except Exception:
+                pass
 
             if was_waiting:
                 if room_state.host_ws is not None:
@@ -737,4 +947,14 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, db: Session =
             room_manager.remove_connection(room_code, websocket, user_id=user_id)
     else:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="room_code doesn't match")
+        log_event(
+            db=db,
+            event_type="WS_CONNECT_FAIL",
+            room_id=None,
+            user_id=None,
+            data= {
+                "reason": "room_code doesn't match",
+                "room_code": room_code
+            }
+        )
         return
