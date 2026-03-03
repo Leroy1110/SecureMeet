@@ -326,6 +326,15 @@ async def handler_chat_send(
         })
         return
     
+    if len(content) > 1000:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "content too long"
+            }
+        })
+        return
+    
     to_user_id = payload.get("to_user_id")
     recipient_ws: WebSocket | None = None
     if to_user_id is not None:
@@ -852,9 +861,39 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, db: Session =
             )
             return
 
+        window_start = datetime.utcnow()
+        msg_count = 0
+
         try:
             while True:
                 data: dict = await websocket.receive_json()
+                if not isinstance(data, dict):
+                    await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="message must be a JSON object")
+                    return
+
+                now = datetime.utcnow()
+                if (now - window_start).total_seconds() > 10:
+                    window_start = now
+                    msg_count = 0
+                
+                msg_count += 1
+
+                if msg_count > 25:
+                    await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="rate limit exceeded")
+                    try:
+                        log_event(
+                            db=db,
+                            event_type="WS_RATE_LIMIT",
+                            room_id=room_id,
+                            user_id=user_id,
+                            data= {
+                                "room_code": room_code,
+                                "message_count": msg_count
+                            }
+                        )
+                    except Exception:
+                        pass
+                    return
 
                 message_type: str | None = data.get("type")
                 message_payload = data.get("payload")
