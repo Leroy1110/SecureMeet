@@ -1,8 +1,8 @@
 function DashboardPage() {
   return (
     <div>
-      <h1>Dashboard Page</h1>
-      <h1>User dashboard will be here</h1>
+      <h1>Dashboard</h1>
+      <p>User dashboard will be here</p>
     </div>
   );
 }

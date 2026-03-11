@@ -6,7 +6,7 @@ type PageShellProps = {
 
 function PageShell({ children }: PageShellProps) {
   return (
-    <div style={{ maxWidth: "900px", margin: "0 auto", padding: "20px" }}>
+    <div className="max-w-3xl mx-auto p-6">
       {children}
     </div>
   );

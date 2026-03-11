@@ -1,8 +1,8 @@
 function RegisterPage() {
   return (
     <div>
-      <h1>Register Page</h1>
-      <h1>User registration will be here</h1>
+      <h1>Register</h1>
+      <p>User registration will be here</p>
     </div>
   );
 }

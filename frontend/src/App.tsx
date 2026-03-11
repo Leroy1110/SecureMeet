@@ -1,12 +1,9 @@
-import './App.css'
 import AppRouter from './router.tsx'
 
 function App() {
 
   return (
-    <>
       <AppRouter/>
-    </>
   )
 }
 
