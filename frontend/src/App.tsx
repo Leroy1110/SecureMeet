@@ -1,10 +1,11 @@
 import './App.css'
+import AppRouter from './router.tsx'
 
 function App() {
 
   return (
     <>
-      <h1>Welcome to the frontend!</h1>
+      <AppRouter/>
     </>
   )
 }
