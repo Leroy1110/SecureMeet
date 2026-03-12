@@ -31,3 +31,25 @@ export const post = async <T>(endpoint: string, data: unknown): Promise<T> => {
 
   return response.json() as Promise<T>;
 };
+
+export const get = async <T>(endpoint: string): Promise<T> => {
+  const response = await fetch(buildUrl(endpoint), {
+    method: "GET",
+  });
+
+  if (!response.ok) {
+    let errorMessage = `Request failed with status ${response.status}`;
+
+    try {
+        const errorData = await response.json();
+        if(errorData?.detail) {
+            errorMessage = errorData.detail;
+        }
+    } catch {
+
+    }
+    throw new Error(errorMessage);
+  }
+
+  return response.json() as Promise<T>;
+};
