@@ -14,7 +14,7 @@ function AuthCardLayout({
   children,
 }: AuthCardLayoutProps) {
   return (
-    <section className="relative left-1/2 -my-6 flex min-h-screen w-screen -translate-x-1/2 items-center justify-center bg-slate-50 px-2 py-10 sm:px-4 dark:bg-slate-950">
+    <section className="flex min-h-screen items-center justify-center bg-slate-50 px-2 py-10 sm:px-4 dark:bg-slate-950">
       <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8 dark:border-slate-700 dark:bg-slate-900">
         <header className="mb-6 text-center sm:mb-8">
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
