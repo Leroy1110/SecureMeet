@@ -1,24 +1,78 @@
-# Python venv
-backend/.venv/
+# -----------------
+# Python
+# -----------------
 
-# Python cache
+.venv/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 
-# VS Code
-.vscode/
+# -----------------
+# Environment
+# -----------------
 
-# General
 .env
+*.local
 
-# Database
+# -----------------
+# Databases
+# -----------------
+
 *.db
+*.sqlite
+*.sqlite3
 
-# macOS
+# -----------------
+# Node / Frontend
+# -----------------
+
+node_modules/
+dist/
+dist-ssr/
+
+# -----------------
+# Logs
+# -----------------
+
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# -----------------
+# Keys / Secrets
+# -----------------
+
+.keys/
+
+# -----------------
+# IDE
+# -----------------
+
+.vscode/
+.idea/
+
+# -----------------
+# OS
+# -----------------
+
 .DS_Store
 
-# AI file
-PROJECT_CONTEXT.md
+# -----------------
+# Visual Studio
+# -----------------
 
-# Keys
-.keys/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# -----------------
+# AI file
+# -----------------
+PROJECT_CONTEXT.md
