@@ -1,7 +1,8 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import AuthCardLayout from "../components/layout/AuthCardLayout";
+import { useAuth } from "../hooks/useAuth";
 import { post } from "../lib/apiClient";
 import type { LoginRequest, TokenResponse } from "../lib/types";
 
@@ -11,6 +12,8 @@ function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
+  const { setToken } = useAuth();
+  const navigate = useNavigate();
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -29,8 +32,11 @@ function LoginPage() {
     };
 
     try {
-      await post<TokenResponse>("/auth/login", payload);
+      const response = await post<TokenResponse>("/auth/login", payload);
+      const { access_token } = response;
+      setToken(access_token);
       setSuccess(true);
+      navigate("/dashboard");
     } catch (submissionError) {
       const message =
         submissionError instanceof Error
