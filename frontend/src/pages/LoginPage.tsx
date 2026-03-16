@@ -11,8 +11,7 @@ function LoginPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState(false);
-  const { setToken } = useAuth();
+  const { setToken, loadUser } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -23,7 +22,6 @@ function LoginPage() {
     }
 
     setError("");
-    setSuccess(false);
     setLoading(true);
 
     const payload: LoginRequest = {
@@ -35,7 +33,7 @@ function LoginPage() {
       const response = await post<TokenResponse>("/auth/login", payload);
       const { access_token } = response;
       setToken(access_token);
-      setSuccess(true);
+      await loadUser();
       navigate("/dashboard");
     } catch (submissionError) {
       const message =
@@ -109,11 +107,6 @@ function LoginPage() {
       </form>
 
       {error ? <p className="mt-4 text-sm text-red-600 dark:text-red-400">{error}</p> : null}
-      {success ? (
-        <p className="mt-4 text-sm text-green-600 dark:text-green-400">
-          Login successful
-        </p>
-      ) : null}
     </AuthCardLayout>
   );
 }

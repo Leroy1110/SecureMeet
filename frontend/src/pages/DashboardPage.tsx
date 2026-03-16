@@ -7,14 +7,14 @@ function DashboardPage() {
     return <p>Loading session...</p>;
   }
 
-  if (!isAuthenticated) {
+  if (!isAuthenticated || !user) {
     return <p>You are not logged in</p>;
   }
 
   return (
     <div>
-      <h1>Welcome {user?.username}</h1>
-      <p>Email: {user?.email}</p>
+      <h1>Welcome {user.username}</h1>
+      <p>Email: {user.email}</p>
     </div>
   );
 }
