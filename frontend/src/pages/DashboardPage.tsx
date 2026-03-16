@@ -12,8 +12,9 @@ function DashboardPage() {
 
   return (
     <div>
-      <h1>Welcome {user?.username}</h1>
-      <p>Email: {user?.email}</p>
+      <h1>Welcome to your dashboard</h1>
+      <p>This is where your SecureMeet rooms and activity will appear.</p>
+      {user?.username && <p>Signed in as {user.username}</p>}
       <button type="button" onClick={handleLogout}>
         Logout
       </button>
