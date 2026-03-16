@@ -33,7 +33,7 @@ function LoginPage() {
       const response = await post<TokenResponse>("/auth/login", payload);
       const { access_token } = response;
       setToken(access_token);
-      await loadUser();
+      await loadUser(access_token);
       navigate("/dashboard");
     } catch (submissionError) {
       const message =

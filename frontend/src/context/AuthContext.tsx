@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -19,7 +20,7 @@ export type AuthContextValue = {
   isAuthenticated: boolean;
   setToken: (newToken: string) => void;
   clearToken: () => void;
-  loadUser: () => Promise<void>;
+  loadUser: (tokenOverride?: string | null) => Promise<void>;
 };
 
 export const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -34,9 +35,15 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   );
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const tokenRef = useRef<string | null>(token);
+
+  useEffect(() => {
+    tokenRef.current = token;
+  }, [token]);
 
   const setToken = useCallback((newToken: string) => {
     localStorage.setItem(AUTH_TOKEN_KEY, newToken);
+    setUser(null);
     setTokenState(newToken);
   }, []);
 
@@ -44,33 +51,35 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     localStorage.removeItem(AUTH_TOKEN_KEY);
     setTokenState(null);
     setUser(null);
+    setLoading(false);
   }, []);
 
-  const loadUser = useCallback(async () => {
-    const storedToken = localStorage.getItem(AUTH_TOKEN_KEY);
+  const loadUser = useCallback(
+    async (tokenOverride?: string | null) => {
+      const activeToken = tokenOverride ?? tokenRef.current;
 
-    if (!storedToken) {
-      setTokenState(null);
-      setUser(null);
-      setLoading(false);
-      return;
-    }
+      if (!activeToken) {
+        setUser(null);
+        setLoading(false);
+        return;
+      }
 
-    setLoading(true);
-    setTokenState(storedToken);
+      setLoading(true);
 
-    try {
-      const currentUser = await get<User>("/auth/me", {
-        Authorization: `Bearer ${storedToken}`,
-      });
+      try {
+        const currentUser = await get<User>("/auth/me", {
+          Authorization: `Bearer ${activeToken}`,
+        });
 
-      setUser(currentUser);
-    } catch {
-      clearToken();
-    } finally {
-      setLoading(false);
-    }
-  }, [clearToken]);
+        setUser(currentUser);
+      } catch {
+        clearToken();
+      } finally {
+        setLoading(false);
+      }
+    },
+    [clearToken]
+  );
 
   useEffect(() => {
     void loadUser();

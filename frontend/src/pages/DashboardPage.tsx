@@ -1,3 +1,4 @@
+import { Navigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 
 function DashboardPage() {
@@ -8,7 +9,7 @@ function DashboardPage() {
   }
 
   if (!isAuthenticated || !user) {
-    return <p>You are not logged in</p>;
+    return <Navigate to="/login" replace />;
   }
 
   return (
