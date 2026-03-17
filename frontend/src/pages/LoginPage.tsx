@@ -1,7 +1,8 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import AuthCardLayout from "../components/layout/AuthCardLayout";
+import { useAuth } from "../hooks/useAuth";
 import { post } from "../lib/apiClient";
 import type { LoginRequest, TokenResponse } from "../lib/types";
 
@@ -10,7 +11,8 @@ function LoginPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState(false);
+  const { setToken, loadUser } = useAuth();
+  const navigate = useNavigate();
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -20,7 +22,6 @@ function LoginPage() {
     }
 
     setError("");
-    setSuccess(false);
     setLoading(true);
 
     const payload: LoginRequest = {
@@ -29,8 +30,11 @@ function LoginPage() {
     };
 
     try {
-      await post<TokenResponse>("/auth/login", payload);
-      setSuccess(true);
+      const response = await post<TokenResponse>("/auth/login", payload);
+      const { access_token } = response;
+      setToken(access_token);
+      await loadUser(access_token);
+      navigate("/dashboard");
     } catch (submissionError) {
       const message =
         submissionError instanceof Error
@@ -103,11 +107,6 @@ function LoginPage() {
       </form>
 
       {error ? <p className="mt-4 text-sm text-red-600 dark:text-red-400">{error}</p> : null}
-      {success ? (
-        <p className="mt-4 text-sm text-green-600 dark:text-green-400">
-          Login successful
-        </p>
-      ) : null}
     </AuthCardLayout>
   );
 }

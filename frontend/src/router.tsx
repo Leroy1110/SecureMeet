@@ -7,6 +7,8 @@ import NotFoundPage from "./pages/NotFoundPage";
 
 import AuthLayout from "./components/layout/AuthLayout";
 import PageShell from "./components/layout/PageShell";
+import RequireAuth from "./components/auth/RequireAuth";
+import RedirectIfAuthenticated from "./components/auth/RedirectIfAuthenticated";
 
 function AppRouter() {
   return (
@@ -15,12 +17,16 @@ function AppRouter() {
         <Route path="/" element={<Navigate to="/login" replace />} />
 
         <Route element={<AuthLayout />}>
-          <Route path="login" element={<LoginPage />} />
-          <Route path="register" element={<RegisterPage />} />
+          <Route element={<RedirectIfAuthenticated />}>
+            <Route path="login" element={<LoginPage />} />
+            <Route path="register" element={<RegisterPage />} />
+          </Route>
         </Route>
 
-        <Route element={<PageShell />}>
-          <Route path="dashboard" element={<DashboardPage />} />
+        <Route element={<RequireAuth />}>
+          <Route element={<PageShell />}>
+            <Route path="dashboard" element={<DashboardPage />} />
+          </Route>
         </Route>
 
         <Route path="rooms/:roomCode" element={<RoomPage />} />

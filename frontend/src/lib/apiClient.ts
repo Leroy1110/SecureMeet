@@ -6,13 +6,22 @@ if (!BASE_URL) {
 
 const buildUrl = (endpoint: string): string => `${BASE_URL}${endpoint}`;
 
-export const post = async <T>(endpoint: string, data: unknown): Promise<T> => {
+export const post = async <T>(
+  endpoint: string,
+  data: unknown = null,
+  headers?: HeadersInit
+): Promise<T> => {
+  const mergedHeaders = new Headers(headers);
+  const hasBody = data !== null && data !== undefined;
+
+  if (hasBody && !mergedHeaders.has("Content-Type")) {
+    mergedHeaders.set("Content-Type", "application/json");
+  }
+
   const response = await fetch(buildUrl(endpoint), {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(data),
+    headers: mergedHeaders,
+    body: hasBody ? JSON.stringify(data) : undefined,
   });
 
   if (!response.ok) {
@@ -32,9 +41,10 @@ export const post = async <T>(endpoint: string, data: unknown): Promise<T> => {
   return response.json() as Promise<T>;
 };
 
-export const get = async <T>(endpoint: string): Promise<T> => {
+export const get = async <T>(endpoint: string, headers?: HeadersInit): Promise<T> => {
   const response = await fetch(buildUrl(endpoint), {
     method: "GET",
+    headers,
   });
 
   if (!response.ok) {
