@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { post } from "../lib/apiClient";
 import type { RoomCreateResponse, RoomJoinResponse } from "../lib/types";
+import { ROOM_SESSION_TOKEN_KEY } from "../lib/roomSession";
 
 function DashboardPage() {
   const { token, user, clearToken } = useAuth();
@@ -16,8 +17,6 @@ function DashboardPage() {
   const [joinRoomPassword, setJoinRoomPassword] = useState("");
   const [joinLoading, setJoinLoading] = useState(false);
   const [joinError, setJoinError] = useState("");
-  const [roomJwt, setRoomJwt] = useState<string | null>(null);
-
   const handleLogout = () => {
     clearToken();
     navigate("/login");
@@ -72,13 +71,14 @@ function DashboardPage() {
 
     setJoinLoading(true);
     setJoinError("");
-    setRoomJwt(null);
+
+    const roomCode = joinRoomCode.trim();
 
     try {
       const response = await post<RoomJoinResponse>(
         "/rooms/join",
         {
-          room_code: joinRoomCode.trim(),
+          room_code: roomCode,
           room_password: joinRoomPassword,
         },
         {
@@ -86,8 +86,9 @@ function DashboardPage() {
         }
       );
 
-      setRoomJwt(response.room_jwt);
+      localStorage.setItem(ROOM_SESSION_TOKEN_KEY, response.room_jwt);
       setJoinRoomPassword("");
+      navigate(`/rooms/${roomCode}`);
     } catch (joinRoomError) {
       setJoinError(getRequestErrorMessage(joinRoomError, "Unable to join room right now."));
     } finally {
@@ -191,11 +192,6 @@ function DashboardPage() {
         {joinError ? (
           <p className="mt-3 rounded-md border border-red-200 bg-red-50 p-2 text-sm text-red-600">
             {joinError}
-          </p>
-        ) : null}
-        {roomJwt !== null ? (
-          <p className="mt-3 rounded-md border border-green-200 bg-green-50 p-2 text-sm text-green-700">
-            Join successful
           </p>
         ) : null}
       </section>
