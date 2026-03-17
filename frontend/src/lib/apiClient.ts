@@ -8,16 +8,20 @@ const buildUrl = (endpoint: string): string => `${BASE_URL}${endpoint}`;
 
 export const post = async <T>(
   endpoint: string,
-  data: unknown,
+  data: unknown = null,
   headers?: HeadersInit
 ): Promise<T> => {
   const mergedHeaders = new Headers(headers);
-  mergedHeaders.set("Content-Type", "application/json");
+  const hasBody = data !== null && data !== undefined;
+
+  if (hasBody && !mergedHeaders.has("Content-Type")) {
+    mergedHeaders.set("Content-Type", "application/json");
+  }
 
   const response = await fetch(buildUrl(endpoint), {
     method: "POST",
     headers: mergedHeaders,
-    body: JSON.stringify(data),
+    body: hasBody ? JSON.stringify(data) : undefined,
   });
 
   if (!response.ok) {
