@@ -32,8 +32,8 @@ export const post = async <T>(
         if(errorData?.detail) {
             errorMessage = errorData.detail;
         }
-    } catch {
-
+    } catch (error){
+      console.error("Failed to parse error response", error);
     }
     throw new Error(errorMessage);
   }
@@ -55,8 +55,8 @@ export const get = async <T>(endpoint: string, headers?: HeadersInit): Promise<T
         if(errorData?.detail) {
             errorMessage = errorData.detail;
         }
-    } catch {
-
+    } catch (error){
+      console.error("Failed to parse error response", error);
     }
     throw new Error(errorMessage);
   }
