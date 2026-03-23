@@ -120,7 +120,6 @@ function RoomPage() {
     const { url, error } = buildRoomSocketUrl(normalizedRoomCode, roomToken);
 
     if (error) {
-      setConnectionStatus("error");
       setLastError(error);
       return;
     }
@@ -129,6 +128,7 @@ function RoomPage() {
     setLastError("");
 
     const socket = new WebSocket(url);
+    let hadSocketError = false;
 
     const applyCommonState = (record: JsonRecord) => {
       const incomingRole = pickString(record, ["role"]);
@@ -147,10 +147,13 @@ function RoomPage() {
     };
 
     socket.onclose = () => {
-      setConnectionStatus("closed");
+      if (!hadSocketError) {
+        setConnectionStatus("closed");
+      }
     };
 
     socket.onerror = () => {
+      hadSocketError = true;
       setConnectionStatus("error");
       setLastError("WebSocket connection error.");
     };
@@ -220,12 +223,8 @@ function RoomPage() {
           if (isJsonRecord(payloadValue)) {
             const waiting = resolveList(payloadValue, ["waiting_users", "waiting", "users"]);
             const active = resolveList(payloadValue, ["active_users", "active", "users"]);
-            if (waiting.length > 0) {
-              setWaitingUsers(waiting);
-            }
-            if (active.length > 0) {
-              setActiveUsers(active);
-            }
+            setWaitingUsers(waiting);
+            setActiveUsers(active);
           }
           break;
         }
