@@ -6,6 +6,7 @@ type ConnectionStatus = "connecting" | "open" | "connected" | "closed" | "error"
 type SessionStatus = "unknown" | "waiting" | "active" | "rejected" | "kicked" | "disconnected" | "error";
 type JsonRecord = Record<string, unknown>;
 type StatusTone = "neutral" | "success" | "warning" | "danger";
+type HostMemberActionType = "waiting.approve" | "waiting.reject" | "member.kick";
 
 const FINAL_SESSION_STATUSES: SessionStatus[] = ["rejected", "kicked", "disconnected", "error"];
 
@@ -13,6 +14,48 @@ const isJsonRecord = (value: unknown): value is JsonRecord =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 const readString = (value: unknown): string => (typeof value === "string" ? value : "");
+
+const parsePositiveInteger = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isInteger(value) && value > 0) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const parsedValue = Number(value);
+    if (Number.isInteger(parsedValue) && parsedValue > 0) {
+      return parsedValue;
+    }
+  }
+
+  return null;
+};
+
+const readUserIdFromToken = (token: string): number | null => {
+  const tokenParts = token.split(".");
+  if (tokenParts.length < 2) {
+    return null;
+  }
+
+  try {
+    const payloadBase64 = tokenParts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const normalizedPayload = payloadBase64.padEnd(Math.ceil(payloadBase64.length / 4) * 4, "=");
+    const decodedPayload = atob(normalizedPayload);
+    const parsedPayload = JSON.parse(decodedPayload) as unknown;
+
+    if (!isJsonRecord(parsedPayload)) {
+      return null;
+    }
+
+    return (
+      parsePositiveInteger(parsedPayload.user_id) ??
+      parsePositiveInteger(parsedPayload.userId) ??
+      parsePositiveInteger(parsedPayload.id) ??
+      parsePositiveInteger(parsedPayload.sub)
+    );
+  } catch {
+    return null;
+  }
+};
 
 const pickString = (record: JsonRecord, keys: string[]): string => {
   for (const key of keys) {
@@ -193,6 +236,7 @@ function RoomPage() {
   const [lastError, setLastError] = useState("");
   const [hostActionError, setHostActionError] = useState("");
   const [hostActionPendingKey, setHostActionPendingKey] = useState("");
+  const [localUserId, setLocalUserId] = useState<number | null>(() => readUserIdFromToken(roomToken));
   const socketRef = useRef<WebSocket | null>(null);
   const socketConfig = useMemo(() => {
     if (!hasPrerequisites) {
@@ -217,9 +261,9 @@ function RoomPage() {
     return errors;
   }, [normalizedRoomCode, roomToken]);
 
-  const sendHostWaitingAction = (messageType: "waiting.approve" | "waiting.reject", userLabel: string) => {
+  const sendHostMemberAction = (messageType: HostMemberActionType, userLabel: string) => {
     if (role !== "host") {
-      setHostActionError("Only the host can manage waiting users.");
+      setHostActionError("Only the host can manage room members.");
       return;
     }
 
@@ -229,9 +273,18 @@ function RoomPage() {
       return;
     }
 
-    const userId = Number(userLabel);
-    if (!Number.isInteger(userId) || userId <= 0) {
-      setHostActionError(`Cannot ${messageType === "waiting.approve" ? "approve" : "reject"}: invalid user id.`);
+    const userId = parsePositiveInteger(userLabel);
+    if (!userId) {
+      if (messageType === "member.kick") {
+        setHostActionError("Cannot kick: invalid user id.");
+      } else {
+        setHostActionError(`Cannot ${messageType === "waiting.approve" ? "approve" : "reject"}: invalid user id.`);
+      }
+      return;
+    }
+
+    if (messageType === "member.kick" && localUserId !== null && userId === localUserId) {
+      setHostActionError("You cannot kick your own host session.");
       return;
     }
 
@@ -249,10 +302,22 @@ function RoomPage() {
         })
       );
     } catch {
-      setHostActionError(`Failed to ${messageType === "waiting.approve" ? "approve" : "reject"} waiting user.`);
+      if (messageType === "member.kick") {
+        setHostActionError("Failed to kick active user.");
+      } else {
+        setHostActionError(`Failed to ${messageType === "waiting.approve" ? "approve" : "reject"} waiting user.`);
+      }
     } finally {
       setHostActionPendingKey("");
     }
+  };
+
+  const sendHostWaitingAction = (messageType: "waiting.approve" | "waiting.reject", userLabel: string) => {
+    sendHostMemberAction(messageType, userLabel);
+  };
+
+  const sendHostKickAction = (userLabel: string) => {
+    sendHostMemberAction("member.kick", userLabel);
   };
 
   useEffect(() => {
@@ -374,6 +439,13 @@ function RoomPage() {
         case "system.connected": {
           setConnectionStatus("connected");
           if (isJsonRecord(payloadValue)) {
+            const connectedUserId =
+              parsePositiveInteger(payloadValue.user_id) ??
+              parsePositiveInteger(payloadValue.userId) ??
+              parsePositiveInteger(payloadValue.id);
+            if (connectedUserId) {
+              setLocalUserId((previousUserId) => previousUserId ?? connectedUserId);
+            }
             const waiting = resolveList(payloadValue, ["waiting_users", "waiting", "users"]);
             const active = resolveList(payloadValue, ["active_users", "active", "users"]);
             setWaitingUsers(waiting);
@@ -634,6 +706,45 @@ function RoomPage() {
                   })}
                 </ul>
               )}
+
+              <div className="border-t border-slate-200 pt-4 dark:border-slate-800">
+                <h3 className="text-sm font-semibold tracking-tight text-slate-900 dark:text-slate-100">Active users</h3>
+                <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                  Active participants currently connected to this room.
+                </p>
+
+                {activeUsers.length === 0 ? (
+                  <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">No active users yet.</p>
+                ) : (
+                  <ul className="mt-3 space-y-2">
+                    {activeUsers.map((userLabel) => {
+                      const userId = parsePositiveInteger(userLabel);
+                      const kickKey = userId ? `member.kick:${userId}` : "";
+                      const isLocalHost = localUserId !== null && userId === localUserId;
+                      const canKick = Boolean(userId) && !isLocalHost;
+
+                      return (
+                        <li
+                          key={userLabel}
+                          className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between dark:border-slate-800 dark:bg-slate-800"
+                        >
+                          <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{userLabel}</p>
+                          {canKick ? (
+                            <button
+                              type="button"
+                              onClick={() => sendHostKickAction(userLabel)}
+                              disabled={hostActionPendingKey === kickKey}
+                              className="inline-flex h-9 items-center justify-center rounded-lg border border-red-300 bg-red-50 px-3 text-xs font-medium text-red-700 transition duration-200 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/60"
+                            >
+                              Kick
+                            </button>
+                          ) : null}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
             </div>
           </section>
         ) : null}
