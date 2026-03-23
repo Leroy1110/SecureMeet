@@ -248,7 +248,6 @@ function RoomPage() {
         case "waiting.list": {
           if (isJsonRecord(payloadValue)) {
             setWaitingUsers(resolveList(payloadValue, ["waiting_users", "waiting", "users"]));
-            setSessionStatus((previousStatus) => (previousStatus === "unknown" ? "waiting" : previousStatus));
           }
           break;
         }
@@ -262,7 +261,6 @@ function RoomPage() {
           if (isJsonRecord(payloadValue)) {
             const user = resolveSingleUser(payloadValue);
             setWaitingUsers((previousUsers) => addUser(previousUsers, user));
-            setSessionStatus((previousStatus) => (previousStatus === "unknown" ? "waiting" : previousStatus));
           }
           break;
         }
