@@ -5,6 +5,9 @@ import { ROOM_SESSION_TOKEN_KEY } from "../lib/roomSession";
 type ConnectionStatus = "connecting" | "open" | "connected" | "closed" | "error";
 type SessionStatus = "unknown" | "waiting" | "active" | "rejected" | "kicked" | "disconnected" | "error";
 type JsonRecord = Record<string, unknown>;
+type StatusTone = "neutral" | "success" | "warning" | "danger";
+
+const FINAL_SESSION_STATUSES: SessionStatus[] = ["rejected", "kicked", "disconnected", "error"];
 
 const isJsonRecord = (value: unknown): value is JsonRecord =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -82,6 +85,91 @@ const buildRoomSocketUrl = (roomCode: string, roomToken: string): { url: string;
   const url = `${normalizedBase}/ws/rooms/${encodeURIComponent(roomCode)}?token=${encodeURIComponent(roomToken)}`;
 
   return { url, error: "" };
+};
+
+const getSessionStateContent = (
+  status: SessionStatus,
+  fallbackError: string
+): { title: string; description: string; tone: StatusTone } => {
+  switch (status) {
+    case "waiting":
+      return {
+        title: "Waiting for host approval",
+        description: "A host must approve your access before you can join this meeting.",
+        tone: "neutral",
+      };
+    case "active":
+      return {
+        title: "You are in the room",
+        description: "Your session is active and connected to this SecureMeet room.",
+        tone: "success",
+      };
+    case "rejected":
+      return {
+        title: "Access rejected",
+        description: "Your join request was declined by the host.",
+        tone: "danger",
+      };
+    case "kicked":
+      return {
+        title: "Removed from room",
+        description: "Your session was removed by the host.",
+        tone: "danger",
+      };
+    case "disconnected":
+      return {
+        title: "Session disconnected",
+        description: "This session ended or was replaced by another connection.",
+        tone: "warning",
+      };
+    case "error":
+      return {
+        title: "Connection error",
+        description: fallbackError || "Something went wrong while maintaining your room session.",
+        tone: "danger",
+      };
+    case "unknown":
+    default:
+      return {
+        title: "Connecting to room",
+        description: "We are establishing your SecureMeet room session.",
+        tone: "neutral",
+      };
+  }
+};
+
+const formatStatusLabel = (value: string): string =>
+  value
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+
+const getToneClasses = (tone: StatusTone): { card: string; badge: string } => {
+  if (tone === "success") {
+    return {
+      card: "border-emerald-200 bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30",
+      badge: "border-emerald-200 bg-emerald-100 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/60 dark:text-emerald-300",
+    };
+  }
+
+  if (tone === "warning") {
+    return {
+      card: "border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30",
+      badge: "border-amber-200 bg-amber-100 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/60 dark:text-amber-300",
+    };
+  }
+
+  if (tone === "danger") {
+    return {
+      card: "border-red-200 bg-red-50 dark:border-red-900/40 dark:bg-red-950/30",
+      badge: "border-red-200 bg-red-100 text-red-700 dark:border-red-900/50 dark:bg-red-950/60 dark:text-red-300",
+    };
+  }
+
+  return {
+    card: "border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900",
+    badge: "border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300",
+  };
 };
 
 function RoomPage() {
@@ -344,78 +432,136 @@ function RoomPage() {
     };
   }, [hasPrerequisites, socketConfig.error, socketConfig.url]);
 
+  const transportStatus = socketConfig.error ? "error" : connectionStatus;
+  const stateContent = getSessionStateContent(sessionStatus, displayedError);
+  const toneClasses = getToneClasses(stateContent.tone);
+  const isFinalState = FINAL_SESSION_STATUSES.includes(sessionStatus);
+
   if (!hasPrerequisites) {
     return (
-      <div className="mx-auto max-w-3xl space-y-4 px-4 py-8">
-        <h1 className="text-2xl font-semibold">Room Page</h1>
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">
-          <p className="font-medium">Cannot open room connection.</p>
-          <ul className="mt-2 list-disc pl-5">
-            {prerequisiteErrors.map((error) => (
-              <li key={error}>{error}</li>
-            ))}
-          </ul>
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
+        <div className="mx-auto max-w-3xl space-y-6 px-4 py-8">
+          <header className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Meeting Room</h1>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              We could not initialize your room session.
+            </p>
+          </header>
+
+          <section className="rounded-xl border border-red-200 bg-red-50 p-5 dark:border-red-900/40 dark:bg-red-950/30">
+            <p className="text-sm font-medium text-red-700 dark:text-red-300">Cannot open room connection.</p>
+            <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-red-700 dark:text-red-300">
+              {prerequisiteErrors.map((error) => (
+                <li key={error}>{error}</li>
+              ))}
+            </ul>
+          </section>
+
+          <button
+            type="button"
+            onClick={() => navigate("/dashboard")}
+            className="inline-flex h-11 items-center justify-center rounded-lg bg-black px-5 text-sm font-medium text-white shadow-sm transition duration-200 hover:bg-neutral-800 dark:bg-blue-900 dark:hover:bg-blue-800"
+          >
+            Back to dashboard
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={() => navigate("/dashboard")}
-          className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800"
-        >
-          Back to dashboard
-        </button>
       </div>
     );
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4 px-4 py-8">
-      <h1 className="text-2xl font-semibold">Room Debug View</h1>
-      <p>
-        <strong>Room Code:</strong> {normalizedRoomCode}
-      </p>
-      <p>
-        <strong>Transport Status:</strong> {socketConfig.error ? "error" : connectionStatus}
-      </p>
-      <p>
-        <strong>Session Status:</strong> {sessionStatus}
-      </p>
-      <p>
-        <strong>Role:</strong> {role || "Unknown"}
-      </p>
-      <p>
-        <strong>Room State:</strong> {roomState || "Unknown"}
-      </p>
-      <p>
-        <strong>State Class:</strong>{" "}
-        {sessionStatus === "active"
-          ? "active"
-          : sessionStatus === "waiting"
-            ? "waiting"
-            : sessionStatus === "unknown"
-              ? "unknown"
-              : "terminal/error"}
-      </p>
-      <p>
-        <strong>Waiting Users ({waitingUsers.length}):</strong> {waitingUsers.join(", ") || "None"}
-      </p>
-      <p>
-        <strong>Active Users ({activeUsers.length}):</strong> {activeUsers.join(", ") || "None"}
-      </p>
-      <p>
-        <strong>Last Message Type:</strong> {lastMessageType || "None"}
-      </p>
-      {displayedError ? (
-        <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          <strong>Last Error:</strong> {displayedError}
-        </p>
-      ) : null}
-      <button
-        type="button"
-        onClick={() => navigate("/dashboard")}
-        className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-      >
-        Back to dashboard
-      </button>
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
+      <div className="mx-auto max-w-3xl space-y-6 px-4 py-8">
+        <header className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Meeting Room</h1>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            SecureMeet room access and real-time session status.
+          </p>
+        </header>
+
+        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-800">
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Room code</p>
+              <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">{normalizedRoomCode}</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-800">
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Connection</p>
+              <span className="mt-2 inline-flex rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-700 dark:text-slate-200">
+                {formatStatusLabel(transportStatus)}
+              </span>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-800">
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Role</p>
+              <span className="mt-2 inline-flex rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-700 dark:text-slate-200">
+                {role ? formatStatusLabel(role) : "Unknown"}
+              </span>
+            </div>
+          </div>
+        </section>
+
+        <section className={`rounded-xl border p-6 shadow-sm ${toneClasses.card}`}>
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Session status</p>
+              <h2 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">{stateContent.title}</h2>
+              <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">{stateContent.description}</p>
+            </div>
+            <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${toneClasses.badge}`}>
+              {formatStatusLabel(sessionStatus)}
+            </span>
+          </div>
+
+          {displayedError && sessionStatus !== "error" ? (
+            <p className="mt-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-300">
+              {displayedError}
+            </p>
+          ) : null}
+
+          {isFinalState ? (
+            <div className="mt-6">
+              <button
+                type="button"
+                onClick={() => navigate("/dashboard")}
+                className="inline-flex h-11 items-center justify-center rounded-lg bg-black px-5 text-sm font-medium text-white shadow-sm transition duration-200 hover:bg-neutral-800 dark:bg-blue-900 dark:hover:bg-blue-800"
+              >
+                Return to dashboard
+              </button>
+            </div>
+          ) : null}
+        </section>
+
+        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="space-y-4">
+            <h3 className="text-sm font-semibold tracking-tight text-slate-900 dark:text-slate-100">Debug details</h3>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-800">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Waiting users ({waitingUsers.length})
+                </p>
+                <p className="mt-1 text-sm text-slate-700 dark:text-slate-200">{waitingUsers.join(", ") || "None"}</p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-800">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Active users ({activeUsers.length})
+                </p>
+                <p className="mt-1 text-sm text-slate-700 dark:text-slate-200">{activeUsers.join(", ") || "None"}</p>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-800">
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Last message type</p>
+              <p className="mt-1 text-sm text-slate-700 dark:text-slate-200">{lastMessageType || "None"}</p>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-800">
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Room state</p>
+              <p className="mt-1 text-sm text-slate-700 dark:text-slate-200">{roomState || "Unknown"}</p>
+            </div>
+          </div>
+        </section>
+      </div>
     </div>
   );
 }
