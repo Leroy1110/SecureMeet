@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ROOM_SESSION_TOKEN_KEY } from "../lib/roomSession";
 
@@ -28,6 +28,10 @@ const pickString = (record: JsonRecord, keys: string[]): string => {
 const extractUserLabel = (value: unknown): string => {
   if (typeof value === "string") {
     return value;
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
   }
 
   if (!isJsonRecord(value)) {
@@ -187,6 +191,9 @@ function RoomPage() {
   const [activeUsers, setActiveUsers] = useState<string[]>([]);
   const [lastMessageType, setLastMessageType] = useState("");
   const [lastError, setLastError] = useState("");
+  const [hostActionError, setHostActionError] = useState("");
+  const [hostActionPendingKey, setHostActionPendingKey] = useState("");
+  const socketRef = useRef<WebSocket | null>(null);
   const socketConfig = useMemo(() => {
     if (!hasPrerequisites) {
       return { url: "", error: "" };
@@ -210,6 +217,44 @@ function RoomPage() {
     return errors;
   }, [normalizedRoomCode, roomToken]);
 
+  const sendHostWaitingAction = (messageType: "waiting.approve" | "waiting.reject", userLabel: string) => {
+    if (role !== "host") {
+      setHostActionError("Only the host can manage waiting users.");
+      return;
+    }
+
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      setHostActionError("Cannot send action while room socket is not connected.");
+      return;
+    }
+
+    const userId = Number(userLabel);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      setHostActionError(`Cannot ${messageType === "waiting.approve" ? "approve" : "reject"}: invalid user id.`);
+      return;
+    }
+
+    setHostActionError("");
+    const actionKey = `${messageType}:${userId}`;
+    setHostActionPendingKey(actionKey);
+
+    try {
+      socket.send(
+        JSON.stringify({
+          type: messageType,
+          payload: {
+            user_id: userId,
+          },
+        })
+      );
+    } catch {
+      setHostActionError(`Failed to ${messageType === "waiting.approve" ? "approve" : "reject"} waiting user.`);
+    } finally {
+      setHostActionPendingKey("");
+    }
+  };
+
   useEffect(() => {
     if (!hasPrerequisites) {
       return;
@@ -222,8 +267,11 @@ function RoomPage() {
     setConnectionStatus("connecting");
     setSessionStatus("unknown");
     setLastError("");
+    setHostActionError("");
+    setHostActionPendingKey("");
 
     const socket = new WebSocket(socketConfig.url);
+    socketRef.current = socket;
     let hadSocketError = false;
 
     const applyCommonState = (record: JsonRecord) => {
@@ -424,6 +472,7 @@ function RoomPage() {
     };
 
     return () => {
+      socketRef.current = null;
       socket.onopen = null;
       socket.onclose = null;
       socket.onerror = null;
@@ -436,6 +485,7 @@ function RoomPage() {
   const stateContent = getSessionStateContent(sessionStatus, displayedError);
   const toneClasses = getToneClasses(stateContent.tone);
   const isFinalState = FINAL_SESSION_STATUSES.includes(sessionStatus);
+  const isHost = role === "host";
 
   if (!hasPrerequisites) {
     return (
@@ -530,6 +580,63 @@ function RoomPage() {
             </div>
           ) : null}
         </section>
+
+        {isHost ? (
+          <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-sm font-semibold tracking-tight text-slate-900 dark:text-slate-100">Waiting for approval</h3>
+                <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                  Review join requests and approve or reject users.
+                </p>
+              </div>
+
+              {hostActionError ? (
+                <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-300">
+                  {hostActionError}
+                </p>
+              ) : null}
+
+              {waitingUsers.length === 0 ? (
+                <p className="text-sm text-slate-600 dark:text-slate-300">No users are waiting right now.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {waitingUsers.map((userLabel) => {
+                    const approveKey = `waiting.approve:${userLabel}`;
+                    const rejectKey = `waiting.reject:${userLabel}`;
+
+                    return (
+                      <li
+                        key={userLabel}
+                        className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between dark:border-slate-800 dark:bg-slate-800"
+                      >
+                        <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{userLabel}</p>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => sendHostWaitingAction("waiting.approve", userLabel)}
+                            disabled={hostActionPendingKey === approveKey}
+                            className="inline-flex h-9 items-center justify-center rounded-lg border border-emerald-300 bg-emerald-50 px-3 text-xs font-medium text-emerald-700 transition duration-200 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-900/40 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-950/60"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => sendHostWaitingAction("waiting.reject", userLabel)}
+                            disabled={hostActionPendingKey === rejectKey}
+                            className="inline-flex h-9 items-center justify-center rounded-lg border border-red-300 bg-red-50 px-3 text-xs font-medium text-red-700 transition duration-200 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/60"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </section>
+        ) : null}
 
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div className="space-y-4">
