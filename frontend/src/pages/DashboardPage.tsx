@@ -19,6 +19,7 @@ function DashboardPage() {
   const [joinError, setJoinError] = useState("");
   const handleLogout = () => {
     clearToken();
+    localStorage.removeItem(ROOM_SESSION_TOKEN_KEY);
     navigate("/login");
   };
 
