@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ROOM_SESSION_TOKEN_KEY } from "../lib/roomSession";
 
-type ConnectionStatus = "connecting" | "connected" | "closed" | "error";
+type ConnectionStatus = "connecting" | "open" | "connected" | "closed" | "error";
+type SessionStatus = "unknown" | "waiting" | "active" | "rejected" | "kicked" | "disconnected" | "error";
 type JsonRecord = Record<string, unknown>;
 
 const isJsonRecord = (value: unknown): value is JsonRecord =>
@@ -91,6 +92,7 @@ function RoomPage() {
   const hasPrerequisites = Boolean(normalizedRoomCode && roomToken);
 
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("closed");
+  const [sessionStatus, setSessionStatus] = useState<SessionStatus>("unknown");
   const [role, setRole] = useState("");
   const [roomState, setRoomState] = useState("");
   const [waitingUsers, setWaitingUsers] = useState<string[]>([]);
@@ -129,6 +131,10 @@ function RoomPage() {
       return;
     }
 
+    setConnectionStatus("connecting");
+    setSessionStatus("unknown");
+    setLastError("");
+
     const socket = new WebSocket(socketConfig.url);
     let hadSocketError = false;
 
@@ -141,11 +147,18 @@ function RoomPage() {
       const incomingRoomState = pickString(record, ["room_state", "roomState", "state"]);
       if (incomingRoomState) {
         setRoomState(incomingRoomState);
+        if (incomingRoomState === "active") {
+          setSessionStatus("active");
+        } else if (incomingRoomState === "waiting") {
+          setSessionStatus("waiting");
+        } else if (incomingRoomState === "rejected") {
+          setSessionStatus("rejected");
+        }
       }
     };
 
     socket.onopen = () => {
-      setConnectionStatus("connected");
+      setConnectionStatus("open");
       setLastError("");
     };
 
@@ -158,6 +171,7 @@ function RoomPage() {
     socket.onerror = () => {
       hadSocketError = true;
       setConnectionStatus("error");
+      setSessionStatus("error");
       setLastError("WebSocket connection error.");
     };
 
@@ -171,8 +185,7 @@ function RoomPage() {
 
       try {
         parsedMessage = JSON.parse(event.data);
-      } catch (error) {
-        console.error("Failed to parse WebSocket message", error);
+      } catch {
         setLastError("Failed to parse WebSocket message.");
         return;
       }
@@ -223,6 +236,7 @@ function RoomPage() {
 
       switch (messageType) {
         case "system.connected": {
+          setConnectionStatus("connected");
           if (isJsonRecord(payloadValue)) {
             const waiting = resolveList(payloadValue, ["waiting_users", "waiting", "users"]);
             const active = resolveList(payloadValue, ["active_users", "active", "users"]);
@@ -234,6 +248,7 @@ function RoomPage() {
         case "waiting.list": {
           if (isJsonRecord(payloadValue)) {
             setWaitingUsers(resolveList(payloadValue, ["waiting_users", "waiting", "users"]));
+            setSessionStatus((previousStatus) => (previousStatus === "unknown" ? "waiting" : previousStatus));
           }
           break;
         }
@@ -247,21 +262,31 @@ function RoomPage() {
           if (isJsonRecord(payloadValue)) {
             const user = resolveSingleUser(payloadValue);
             setWaitingUsers((previousUsers) => addUser(previousUsers, user));
+            setSessionStatus((previousStatus) => (previousStatus === "unknown" ? "waiting" : previousStatus));
           }
           break;
         }
         case "waiting.approved": {
-          if (isJsonRecord(payloadValue)) {
-            const user = resolveSingleUser(payloadValue);
-            setWaitingUsers((previousUsers) => removeUser(previousUsers, user));
-            setActiveUsers((previousUsers) => addUser(previousUsers, user));
-          }
+          setRoomState("active");
+          setSessionStatus("active");
+          setLastError("");
           break;
         }
         case "waiting.rejected": {
+          setRoomState("rejected");
+          setSessionStatus("rejected");
+          setLastError("You were not admitted to this room.");
+          break;
+        }
+        case "waiting.removed": {
           if (isJsonRecord(payloadValue)) {
-            const user = resolveSingleUser(payloadValue);
-            setWaitingUsers((previousUsers) => removeUser(previousUsers, user));
+            const waiting = resolveList(payloadValue, ["waiting_users", "waiting", "users"]);
+            if (waiting.length > 0 || Array.isArray(payloadValue.waiting_users) || Array.isArray(payloadValue.waiting)) {
+              setWaitingUsers(waiting);
+            } else {
+              const user = resolveSingleUser(payloadValue);
+              setWaitingUsers((previousUsers) => removeUser(previousUsers, user));
+            }
           }
           break;
         }
@@ -283,7 +308,19 @@ function RoomPage() {
           const message = isJsonRecord(payloadValue)
             ? pickString(payloadValue, ["message", "detail", "error"])
             : "";
+          setSessionStatus("kicked");
           setLastError(message || "You were removed from this room.");
+          socket.close();
+          break;
+        }
+        case "system.disconnected": {
+          const message = isJsonRecord(payloadValue)
+            ? pickString(payloadValue, ["message", "detail", "error", "reason"])
+            : "";
+          setSessionStatus("disconnected");
+          setRoomState("disconnected");
+          setConnectionStatus("closed");
+          setLastError(message || "This session was disconnected, likely replaced by a newer connection.");
           socket.close();
           break;
         }
@@ -291,6 +328,7 @@ function RoomPage() {
           const message = isJsonRecord(payloadValue)
             ? pickString(payloadValue, ["message", "detail", "error"])
             : "";
+          setSessionStatus("error");
           setLastError(message || "Room WebSocket error message received.");
           break;
         }
@@ -338,13 +376,26 @@ function RoomPage() {
         <strong>Room Code:</strong> {normalizedRoomCode}
       </p>
       <p>
-        <strong>Connection Status:</strong> {socketConfig.error ? "error" : connectionStatus}
+        <strong>Transport Status:</strong> {socketConfig.error ? "error" : connectionStatus}
+      </p>
+      <p>
+        <strong>Session Status:</strong> {sessionStatus}
       </p>
       <p>
         <strong>Role:</strong> {role || "Unknown"}
       </p>
       <p>
         <strong>Room State:</strong> {roomState || "Unknown"}
+      </p>
+      <p>
+        <strong>State Class:</strong>{" "}
+        {sessionStatus === "active"
+          ? "active"
+          : sessionStatus === "waiting"
+            ? "waiting"
+            : sessionStatus === "unknown"
+              ? "unknown"
+              : "terminal/error"}
       </p>
       <p>
         <strong>Waiting Users ({waitingUsers.length}):</strong> {waitingUsers.join(", ") || "None"}
