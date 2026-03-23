@@ -97,6 +97,14 @@ function RoomPage() {
   const [activeUsers, setActiveUsers] = useState<string[]>([]);
   const [lastMessageType, setLastMessageType] = useState("");
   const [lastError, setLastError] = useState("");
+  const socketConfig = useMemo(() => {
+    if (!hasPrerequisites) {
+      return { url: "", error: "" };
+    }
+
+    return buildRoomSocketUrl(normalizedRoomCode, roomToken);
+  }, [hasPrerequisites, normalizedRoomCode, roomToken]);
+  const displayedError = socketConfig.error || lastError;
 
   const prerequisiteErrors = useMemo(() => {
     const errors: string[] = [];
@@ -117,17 +125,11 @@ function RoomPage() {
       return;
     }
 
-    const { url, error } = buildRoomSocketUrl(normalizedRoomCode, roomToken);
-
-    if (error) {
-      setLastError(error);
+    if (socketConfig.error) {
       return;
     }
 
-    setConnectionStatus("connecting");
-    setLastError("");
-
-    const socket = new WebSocket(url);
+    const socket = new WebSocket(socketConfig.url);
     let hadSocketError = false;
 
     const applyCommonState = (record: JsonRecord) => {
@@ -144,6 +146,7 @@ function RoomPage() {
 
     socket.onopen = () => {
       setConnectionStatus("connected");
+      setLastError("");
     };
 
     socket.onclose = () => {
@@ -303,7 +306,7 @@ function RoomPage() {
       socket.onmessage = null;
       socket.close();
     };
-  }, [hasPrerequisites, normalizedRoomCode, roomToken]);
+  }, [hasPrerequisites, socketConfig.error, socketConfig.url]);
 
   if (!hasPrerequisites) {
     return (
@@ -335,7 +338,7 @@ function RoomPage() {
         <strong>Room Code:</strong> {normalizedRoomCode}
       </p>
       <p>
-        <strong>Connection Status:</strong> {connectionStatus}
+        <strong>Connection Status:</strong> {socketConfig.error ? "error" : connectionStatus}
       </p>
       <p>
         <strong>Role:</strong> {role || "Unknown"}
@@ -352,9 +355,9 @@ function RoomPage() {
       <p>
         <strong>Last Message Type:</strong> {lastMessageType || "None"}
       </p>
-      {lastError ? (
+      {displayedError ? (
         <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          <strong>Last Error:</strong> {lastError}
+          <strong>Last Error:</strong> {displayedError}
         </p>
       ) : null}
       <button
