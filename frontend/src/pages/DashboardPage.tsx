@@ -12,6 +12,8 @@ function DashboardPage() {
   const [createLoading, setCreateLoading] = useState(false);
   const [createError, setCreateError] = useState("");
   const [createResult, setCreateResult] = useState<RoomCreateResponse | null>(null);
+  const [enterCreatedRoomLoading, setEnterCreatedRoomLoading] = useState(false);
+  const [enterCreatedRoomError, setEnterCreatedRoomError] = useState("");
 
   const [joinRoomCode, setJoinRoomCode] = useState("");
   const [joinRoomPassword, setJoinRoomPassword] = useState("");
@@ -44,6 +46,7 @@ function DashboardPage() {
     setCreateLoading(true);
     setCreateError("");
     setCreateResult(null);
+    setEnterCreatedRoomError("");
 
     try {
       const response = await post<RoomCreateResponse>("/rooms/", null, {
@@ -58,6 +61,31 @@ function DashboardPage() {
     }
   };
 
+  const joinRoomWithCredentials = async (roomCodeInput: string, roomPassword: string): Promise<string> => {
+    if (!token) {
+      throw new Error("Unauthorized. Please sign in again.");
+    }
+
+    const roomCode = roomCodeInput.trim();
+    const response = await post<RoomJoinResponse>(
+      "/rooms/join",
+      {
+        room_code: roomCode,
+        room_password: roomPassword,
+      },
+      {
+        Authorization: `Bearer ${token}`,
+      }
+    );
+
+    if (!response.room_jwt) {
+      throw new Error("Unable to join room right now.");
+    }
+
+    localStorage.setItem(ROOM_SESSION_TOKEN_KEY, response.room_jwt);
+    return roomCode;
+  };
+
   const handleJoinRoom = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
@@ -65,35 +93,48 @@ function DashboardPage() {
       return;
     }
 
-    if (!token) {
-      setJoinError("Unauthorized. Please sign in again.");
-      return;
-    }
-
     setJoinLoading(true);
     setJoinError("");
 
-    const roomCode = joinRoomCode.trim();
-
     try {
-      const response = await post<RoomJoinResponse>(
-        "/rooms/join",
-        {
-          room_code: roomCode,
-          room_password: joinRoomPassword,
-        },
-        {
-          Authorization: `Bearer ${token}`,
-        }
-      );
-
-      localStorage.setItem(ROOM_SESSION_TOKEN_KEY, response.room_jwt);
+      const roomCode = await joinRoomWithCredentials(joinRoomCode, joinRoomPassword);
       setJoinRoomPassword("");
       navigate(`/rooms/${roomCode}`);
     } catch (joinRoomError) {
       setJoinError(getRequestErrorMessage(joinRoomError, "Unable to join room right now."));
     } finally {
       setJoinLoading(false);
+    }
+  };
+
+  const handleEnterCreatedRoom = async () => {
+    if (enterCreatedRoomLoading || !createResult) {
+      return;
+    }
+
+    setEnterCreatedRoomLoading(true);
+    setEnterCreatedRoomError("");
+
+    try {
+      const roomCode = createResult.room_code.trim();
+      const roomJwt = createResult.room_jwt?.trim() ?? "";
+
+      if (!roomCode) {
+        throw new Error("Missing room code for the created room.");
+      }
+
+      if (!roomJwt) {
+        throw new Error("Missing room session token for the created room.");
+      }
+
+      localStorage.setItem(ROOM_SESSION_TOKEN_KEY, roomJwt);
+      navigate(`/rooms/${roomCode}`);
+    } catch (enterRoomError) {
+      setEnterCreatedRoomError(
+        getRequestErrorMessage(enterRoomError, "Unable to enter the created room right now.")
+      );
+    } finally {
+      setEnterCreatedRoomLoading(false);
     }
   };
 
@@ -167,8 +208,24 @@ function DashboardPage() {
                   <strong>Expires At:</strong> {new Date(createResult.expires_at).toLocaleString()}
                 </p>
                 <p className="text-amber-700 dark:text-amber-300">
-                  Save the room password now. The server returns it only once.
+                  Save these details now. After entering the room, they will no longer be shown here.
                 </p>
+                <p className="text-amber-700 dark:text-amber-300">
+                  The server returns the room password only once.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleEnterCreatedRoom}
+                  disabled={enterCreatedRoomLoading}
+                  className="inline-flex h-11 items-center justify-center rounded-lg bg-black px-5 text-sm font-medium text-white shadow-sm transition duration-200 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-slate-400 dark:bg-blue-900 dark:hover:bg-blue-800 dark:disabled:bg-slate-700"
+                >
+                  {enterCreatedRoomLoading ? "Entering..." : "Enter room"}
+                </button>
+                {enterCreatedRoomError ? (
+                  <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-400">
+                    {enterCreatedRoomError}
+                  </p>
+                ) : null}
               </div>
             ) : null}
           </div>
