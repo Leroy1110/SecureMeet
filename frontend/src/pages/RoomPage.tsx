@@ -1,10 +1,20 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ROOM_SESSION_TOKEN_KEY } from "../lib/roomSession";
+import {
+  type JsonRecord,
+  extractUserLabel,
+  extractUserList,
+  isJsonRecord,
+  parseNullableInteger,
+  parsePositiveInteger,
+  pickString,
+  readString,
+} from "../lib/roomMessageParsers";
+import { getRoomSessionToken, readUserIdFromToken } from "../lib/roomSession";
+import { buildRoomSocketUrl } from "../lib/roomSocket";
 
 type ConnectionStatus = "connecting" | "open" | "connected" | "closed" | "error";
 type SessionStatus = "unknown" | "waiting" | "active" | "rejected" | "kicked" | "disconnected" | "error";
-type JsonRecord = Record<string, unknown>;
 type StatusTone = "neutral" | "success" | "warning" | "danger";
 type HostMemberActionType = "waiting.approve" | "waiting.reject" | "member.kick";
 type OutgoingMessageType = HostMemberActionType | "chat.send";
@@ -17,100 +27,6 @@ type ChatMessage = {
 };
 
 const FINAL_SESSION_STATUSES: SessionStatus[] = ["rejected", "kicked", "disconnected", "error"];
-
-const isJsonRecord = (value: unknown): value is JsonRecord =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-const readString = (value: unknown): string => (typeof value === "string" ? value : "");
-
-const parsePositiveInteger = (value: unknown): number | null => {
-  if (typeof value === "number" && Number.isInteger(value) && value > 0) {
-    return value;
-  }
-
-  if (typeof value === "string") {
-    const parsedValue = Number(value);
-    if (Number.isInteger(parsedValue) && parsedValue > 0) {
-      return parsedValue;
-    }
-  }
-
-  return null;
-};
-
-const parseNullableInteger = (value: unknown): number | null => {
-  if (value === null || typeof value === "undefined") {
-    return null;
-  }
-
-  return parsePositiveInteger(value);
-};
-
-const readUserIdFromToken = (token: string): number | null => {
-  const tokenParts = token.split(".");
-  if (tokenParts.length < 2) {
-    return null;
-  }
-
-  try {
-    const payloadBase64 = tokenParts[1].replace(/-/g, "+").replace(/_/g, "/");
-    const normalizedPayload = payloadBase64.padEnd(Math.ceil(payloadBase64.length / 4) * 4, "=");
-    const decodedPayload = atob(normalizedPayload);
-    const parsedPayload = JSON.parse(decodedPayload) as unknown;
-
-    if (!isJsonRecord(parsedPayload)) {
-      return null;
-    }
-
-    return (
-      parsePositiveInteger(parsedPayload.user_id) ??
-      parsePositiveInteger(parsedPayload.userId) ??
-      parsePositiveInteger(parsedPayload.id) ??
-      parsePositiveInteger(parsedPayload.sub)
-    );
-  } catch {
-    return null;
-  }
-};
-
-const pickString = (record: JsonRecord, keys: string[]): string => {
-  for (const key of keys) {
-    const value = record[key];
-    if (typeof value === "string" && value.trim()) {
-      return value;
-    }
-  }
-
-  return "";
-};
-
-const extractUserLabel = (value: unknown): string => {
-  if (typeof value === "string") {
-    return value;
-  }
-
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return String(value);
-  }
-
-  if (!isJsonRecord(value)) {
-    return "";
-  }
-
-  return pickString(value, ["username", "user_id", "id", "name"]);
-};
-
-const extractUserList = (value: unknown): string[] => {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  const users = value
-    .map((item) => extractUserLabel(item))
-    .filter((item) => Boolean(item.trim()));
-
-  return Array.from(new Set(users));
-};
 
 const addUser = (previousUsers: string[], user: string): string[] => {
   if (!user) {
@@ -126,29 +42,6 @@ const addUser = (previousUsers: string[], user: string): string[] => {
 
 const removeUser = (previousUsers: string[], user: string): string[] =>
   previousUsers.filter((existingUser) => existingUser !== user);
-
-const buildRoomSocketUrl = (roomCode: string, roomToken: string): { url: string; error: string } => {
-  const apiBase = readString(import.meta.env.VITE_API_URL).trim();
-
-  if (!apiBase) {
-    return { url: "", error: "Missing VITE_API_URL environment variable." };
-  }
-
-  let wsBase = "";
-
-  if (apiBase.startsWith("https://")) {
-    wsBase = `wss://${apiBase.slice("https://".length)}`;
-  } else if (apiBase.startsWith("http://")) {
-    wsBase = `ws://${apiBase.slice("http://".length)}`;
-  } else {
-    return { url: "", error: "VITE_API_URL must start with http:// or https://" };
-  }
-
-  const normalizedBase = wsBase.replace(/\/+$/, "");
-  const url = `${normalizedBase}/ws/rooms/${encodeURIComponent(roomCode)}?token=${encodeURIComponent(roomToken)}`;
-
-  return { url, error: "" };
-};
 
 const getSessionStateContent = (
   status: SessionStatus,
@@ -238,7 +131,7 @@ const getToneClasses = (tone: StatusTone): { card: string; badge: string } => {
 function RoomPage() {
   const navigate = useNavigate();
   const { roomCode } = useParams<{ roomCode: string }>();
-  const roomToken = localStorage.getItem(ROOM_SESSION_TOKEN_KEY)?.trim() ?? "";
+  const roomToken = getRoomSessionToken();
   const normalizedRoomCode = roomCode?.trim() ?? "";
   const hasPrerequisites = Boolean(normalizedRoomCode && roomToken);
 
