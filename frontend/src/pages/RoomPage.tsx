@@ -401,9 +401,11 @@ function RoomPage() {
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-800">
                 <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Waiting users ({waitingUsers.length})
+                  {isHost ? `Waiting users (${waitingUsers.length})` : "Waiting users (Host-only visibility)"}
                 </p>
-                <p className="mt-1 text-sm text-slate-700 dark:text-slate-200">{waitingUsers.join(", ") || "None"}</p>
+                <p className="mt-1 text-sm text-slate-700 dark:text-slate-200">
+                  {isHost ? waitingUsers.join(", ") || "None" : "Unavailable for participants"}
+                </p>
               </div>
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-800">
                 <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">

@@ -189,6 +189,13 @@ async def handler_approve(
             "type": "waiting.approved",
             "payload": {}
         })
+        await user_approved.send_json({
+            "type": "active.list",
+            "payload": {
+                "room_code": room_code,
+                "users": list(room_state.active_ws.keys())
+            }
+        })
 
         await websocket.send_json({
             "type": "waiting.removed",
@@ -845,6 +852,13 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, db: Session =
                     "room_code": room_code,
                     "role": role,
                     "state": "active"
+                }
+            })
+            await websocket.send_json({
+                "type": "active.list",
+                "payload": {
+                    "room_code": room_code,
+                    "users": list(room_state.active_ws.keys())
                 }
             })
         else:
