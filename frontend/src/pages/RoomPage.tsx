@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ROOM_SESSION_TOKEN_KEY } from "../lib/roomSession";
 
@@ -7,6 +7,14 @@ type SessionStatus = "unknown" | "waiting" | "active" | "rejected" | "kicked" | 
 type JsonRecord = Record<string, unknown>;
 type StatusTone = "neutral" | "success" | "warning" | "danger";
 type HostMemberActionType = "waiting.approve" | "waiting.reject" | "member.kick";
+type OutgoingMessageType = HostMemberActionType | "chat.send";
+type ChatMessage = {
+  room_code: string;
+  from_user_id: number | null;
+  to_user_id: number | null;
+  content: string;
+  created_at: string;
+};
 
 const FINAL_SESSION_STATUSES: SessionStatus[] = ["rejected", "kicked", "disconnected", "error"];
 
@@ -28,6 +36,14 @@ const parsePositiveInteger = (value: unknown): number | null => {
   }
 
   return null;
+};
+
+const parseNullableInteger = (value: unknown): number | null => {
+  if (value === null || typeof value === "undefined") {
+    return null;
+  }
+
+  return parsePositiveInteger(value);
 };
 
 const readUserIdFromToken = (token: string): number | null => {
@@ -236,8 +252,12 @@ function RoomPage() {
   const [lastError, setLastError] = useState("");
   const [hostActionError, setHostActionError] = useState("");
   const [hostActionPendingKey, setHostActionPendingKey] = useState("");
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatError, setChatError] = useState("");
   const [localUserId, setLocalUserId] = useState<number | null>(() => readUserIdFromToken(roomToken));
   const socketRef = useRef<WebSocket | null>(null);
+  const lastOutgoingMessageTypeRef = useRef<OutgoingMessageType | null>(null);
   const socketConfig = useMemo(() => {
     if (!hasPrerequisites) {
       return { url: "", error: "" };
@@ -291,6 +311,7 @@ function RoomPage() {
     setHostActionError("");
     const actionKey = `${messageType}:${userId}`;
     setHostActionPendingKey(actionKey);
+    lastOutgoingMessageTypeRef.current = messageType;
 
     try {
       socket.send(
@@ -302,6 +323,7 @@ function RoomPage() {
         })
       );
     } catch {
+      lastOutgoingMessageTypeRef.current = null;
       if (messageType === "member.kick") {
         setHostActionError("Failed to kick active user.");
       } else {
@@ -320,6 +342,48 @@ function RoomPage() {
     sendHostMemberAction("member.kick", userLabel);
   };
 
+  const canSendChat = sessionStatus === "active" || role === "host";
+  const isSocketOpen = connectionStatus === "open" || connectionStatus === "connected";
+
+  const sendChatMessage = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setChatError("");
+
+    if (!canSendChat) {
+      setChatError("Only host or active users can send chat messages.");
+      return;
+    }
+
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN || !isSocketOpen) {
+      setChatError("Cannot send message while room socket is not connected.");
+      return;
+    }
+
+    const content = chatInput.trim();
+    if (!content) {
+      setChatError("Enter a message before sending.");
+      return;
+    }
+
+    try {
+      lastOutgoingMessageTypeRef.current = "chat.send";
+      socket.send(
+        JSON.stringify({
+          type: "chat.send",
+          payload: {
+            content,
+            to_user_id: null,
+          },
+        })
+      );
+      setChatInput("");
+    } catch {
+      lastOutgoingMessageTypeRef.current = null;
+      setChatError("Failed to send chat message.");
+    }
+  };
+
   useEffect(() => {
     if (!hasPrerequisites) {
       return;
@@ -334,6 +398,7 @@ function RoomPage() {
     setLastError("");
     setHostActionError("");
     setHostActionPendingKey("");
+    setChatError("");
 
     const socket = new WebSocket(socketConfig.url);
     socketRef.current = socket;
@@ -438,6 +503,7 @@ function RoomPage() {
       switch (messageType) {
         case "system.connected": {
           setConnectionStatus("connected");
+          lastOutgoingMessageTypeRef.current = null;
           if (isJsonRecord(payloadValue)) {
             const connectedUserId =
               parsePositiveInteger(payloadValue.user_id) ??
@@ -473,12 +539,14 @@ function RoomPage() {
           break;
         }
         case "waiting.approved": {
+          lastOutgoingMessageTypeRef.current = null;
           setRoomState("active");
           setSessionStatus("active");
           setLastError("");
           break;
         }
         case "waiting.rejected": {
+          lastOutgoingMessageTypeRef.current = null;
           setRoomState("rejected");
           setSessionStatus("rejected");
           setLastError("You were not admitted to this room.");
@@ -511,6 +579,7 @@ function RoomPage() {
           break;
         }
         case "system.kicked": {
+          lastOutgoingMessageTypeRef.current = null;
           const message = isJsonRecord(payloadValue)
             ? pickString(payloadValue, ["message", "detail", "error"])
             : "";
@@ -520,6 +589,7 @@ function RoomPage() {
           break;
         }
         case "system.disconnected": {
+          lastOutgoingMessageTypeRef.current = null;
           const message = isJsonRecord(payloadValue)
             ? pickString(payloadValue, ["message", "detail", "error", "reason"])
             : "";
@@ -530,10 +600,49 @@ function RoomPage() {
           socket.close();
           break;
         }
+        case "chat.message": {
+          if (!isJsonRecord(payloadValue)) {
+            break;
+          }
+
+          const content = readString(payloadValue.content);
+          if (!content.trim()) {
+            break;
+          }
+
+          const chatMessage: ChatMessage = {
+            room_code: readString(payloadValue.room_code),
+            from_user_id: parseNullableInteger(payloadValue.from_user_id),
+            to_user_id: parseNullableInteger(payloadValue.to_user_id),
+            content,
+            created_at: readString(payloadValue.created_at),
+          };
+
+          setChatMessages((previousMessages) => [...previousMessages, chatMessage]);
+          if (lastOutgoingMessageTypeRef.current === "chat.send") {
+            setChatError("");
+            lastOutgoingMessageTypeRef.current = null;
+          }
+          break;
+        }
         case "error": {
           const message = isJsonRecord(payloadValue)
             ? pickString(payloadValue, ["message", "detail", "error"])
             : "";
+          const normalizedMessage = message.toLowerCase();
+          const isChatRelatedError =
+            lastOutgoingMessageTypeRef.current === "chat.send" ||
+            normalizedMessage.includes("chat") ||
+            normalizedMessage.includes("content") ||
+            normalizedMessage.includes("to_user_id") ||
+            normalizedMessage.includes("only active users can send messages");
+
+          if (isChatRelatedError) {
+            setChatError(message || "Failed to send chat message.");
+            lastOutgoingMessageTypeRef.current = null;
+            break;
+          }
+
           setSessionStatus("error");
           setLastError(message || "Room WebSocket error message received.");
           break;
@@ -748,6 +857,70 @@ function RoomPage() {
             </div>
           </section>
         ) : null}
+
+        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="space-y-4">
+            <div>
+              <h3 className="text-sm font-semibold tracking-tight text-slate-900 dark:text-slate-100">Chat</h3>
+              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                Public room messages for active participants and host.
+              </p>
+            </div>
+
+            {chatError ? (
+              <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-300">
+                {chatError}
+              </p>
+            ) : null}
+
+            {!canSendChat ? (
+              <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/40 dark:text-amber-300">
+                Chat sending is available only after you become active in the room.
+              </p>
+            ) : null}
+
+            <div className="max-h-72 space-y-2 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-800">
+              {chatMessages.length === 0 ? (
+                <p className="text-sm text-slate-600 dark:text-slate-300">No messages yet.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {chatMessages.map((message, index) => (
+                    <li
+                      key={`${message.from_user_id ?? "unknown"}:${message.created_at}:${index}`}
+                      className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900"
+                    >
+                      <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                        User {message.from_user_id ?? "Unknown"}
+                        {message.created_at ? ` • ${message.created_at}` : ""}
+                      </p>
+                      <p className="mt-1 whitespace-pre-wrap wrap-break-word text-sm text-slate-800 dark:text-slate-100">
+                        {message.content}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <form onSubmit={sendChatMessage} className="flex flex-col gap-3 sm:flex-row">
+              <input
+                type="text"
+                value={chatInput}
+                onChange={(event) => setChatInput(event.target.value)}
+                disabled={!canSendChat || !isSocketOpen}
+                placeholder={canSendChat ? "Type a message" : "You can chat once your session is active"}
+                className="h-11 flex-1 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none transition duration-200 placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-blue-500 dark:focus:ring-blue-900/40"
+              />
+              <button
+                type="submit"
+                disabled={!canSendChat || !isSocketOpen}
+                className="inline-flex h-11 items-center justify-center rounded-lg bg-black px-5 text-sm font-medium text-white shadow-sm transition duration-200 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-blue-900 dark:hover:bg-blue-800"
+              >
+                Send
+              </button>
+            </form>
+          </div>
+        </section>
 
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div className="space-y-4">
