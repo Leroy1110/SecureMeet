@@ -15,6 +15,13 @@ router = APIRouter()
 
 room_manager: RoomManager = RoomManager()
 
+def build_active_user_ids(room_state: RoomState) -> list[int]:
+    users = list(room_state.active_ws.keys())
+    host_user_id = room_state.host_user_id
+    if host_user_id is not None and host_user_id not in users:
+        users.append(host_user_id)
+    return users
+
 def validate_room_for_ws_connect(db: Session, *, room_code_path: str, token_payload: dict) -> tuple[int, int, str, str]:
     payload_room_code: str = token_payload.get("room_code")
     if payload_room_code is None:
@@ -193,7 +200,7 @@ async def handler_approve(
             "type": "active.list",
             "payload": {
                 "room_code": room_code,
-                "users": list(room_state.active_ws.keys())
+                "users": build_active_user_ids(room_state)
             }
         })
 
@@ -789,6 +796,20 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, db: Session =
         room_state = room_manager.get_or_create_room(room_code=room_code)
         
         if role == "host":
+            host_user_id = room_state.host_user_id
+            if host_user_id is not None:
+                message_host_add = {
+                    "type": "active.add",
+                    "payload": {
+                        "user_id": host_user_id
+                    }
+                }
+                for ws_active in room_state.active_ws.values():
+                    try:
+                        await ws_active.send_json(message_host_add)
+                    except Exception:
+                        pass
+
             await websocket.send_json({
                 "type": "system.connected",
                 "payload": {
@@ -812,7 +833,7 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, db: Session =
                 "type": "active.list",
                 "payload": {
                     "room_code": room_code,
-                    "users": list(active_list.keys())
+                    "users": build_active_user_ids(room_state)
                 }
             })
         elif state == "waiting":
@@ -858,7 +879,7 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, db: Session =
                 "type": "active.list",
                 "payload": {
                     "room_code": room_code,
-                    "users": list(room_state.active_ws.keys())
+                    "users": build_active_user_ids(room_state)
                 }
             })
         else:
@@ -994,6 +1015,18 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, db: Session =
                 if room_state.host_ws is not None:
                     try:
                         await room_state.host_ws.send_json(message_active_remove)
+                    except Exception:
+                        pass
+            elif role == "host" and room_state.host_ws is websocket and room_state.host_user_id is not None:
+                message_active_remove_host = {
+                    "type": "active.remove",
+                    "payload": {
+                        "user_id": room_state.host_user_id
+                    }
+                }
+                for ws_active in room_state.active_ws.values():
+                    try:
+                        await ws_active.send_json(message_active_remove_host)
                     except Exception:
                         pass
 
