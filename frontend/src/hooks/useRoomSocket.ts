@@ -25,6 +25,11 @@ export type ChatMessage = {
   created_at: string;
 };
 
+export type ChatRecipientOption = {
+  userId: number;
+  label: string;
+};
+
 export type UseRoomSocketParams = {
   roomCode?: string;
 };
@@ -43,6 +48,8 @@ export type UseRoomSocketResult = {
   chatMessages: ChatMessage[];
   chatInput: string;
   chatError: string;
+  selectedRecipientUserId: number | null;
+  chatRecipientOptions: ChatRecipientOption[];
   localUserId: number | null;
   hasPrerequisites: boolean;
   normalizedRoomCode: string;
@@ -54,6 +61,8 @@ export type UseRoomSocketResult = {
   isFinalState: boolean;
   transportStatus: ConnectionStatus;
   setChatInput: Dispatch<SetStateAction<string>>;
+  setSelectedRecipientUserId: Dispatch<SetStateAction<number | null>>;
+  setSelectedRecipientFromValue: (value: string) => void;
   sendHostWaitingAction: (messageType: "waiting.approve" | "waiting.reject", userLabel: string) => void;
   sendHostKickAction: (userLabel: string) => void;
   sendChatMessage: (event: FormEvent<HTMLFormElement>) => void;
@@ -94,6 +103,7 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatError, setChatError] = useState("");
+  const [selectedRecipientUserId, setSelectedRecipientUserId] = useState<number | null>(null);
   const [localUserId, setLocalUserId] = useState<number | null>(() => readUserIdFromToken(roomToken));
   const socketRef = useRef<WebSocket | null>(null);
   const lastOutgoingMessageTypeRef = useRef<OutgoingMessageType | null>(null);
@@ -183,6 +193,55 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
 
   const canSendChat = sessionStatus === "active" || role === "host";
   const isSocketOpen = connectionStatus === "open" || connectionStatus === "connected";
+  const chatRecipientOptions = useMemo<ChatRecipientOption[]>(() => {
+    const optionsByUserId = new Map<number, ChatRecipientOption>();
+
+    for (const userLabel of activeUsers) {
+      const userId = parsePositiveInteger(userLabel);
+      if (!userId) {
+        continue;
+      }
+
+      if (localUserId !== null && userId === localUserId) {
+        continue;
+      }
+
+      if (!optionsByUserId.has(userId)) {
+        optionsByUserId.set(userId, {
+          userId,
+          label: `User ${userId}`,
+        });
+      }
+    }
+
+    return Array.from(optionsByUserId.values()).sort((left, right) => left.userId - right.userId);
+  }, [activeUsers, localUserId]);
+
+  const setSelectedRecipientFromValue = (value: string) => {
+    if (value === "public") {
+      setSelectedRecipientUserId(null);
+      return;
+    }
+
+    const parsedUserId = parsePositiveInteger(value);
+    if (!parsedUserId || !chatRecipientOptions.some((option) => option.userId === parsedUserId)) {
+      setSelectedRecipientUserId(null);
+      return;
+    }
+
+    setSelectedRecipientUserId(parsedUserId);
+  };
+
+  useEffect(() => {
+    if (selectedRecipientUserId === null) {
+      return;
+    }
+
+    const stillValid = chatRecipientOptions.some((option) => option.userId === selectedRecipientUserId);
+    if (!stillValid) {
+      setSelectedRecipientUserId(null);
+    }
+  }, [chatRecipientOptions, selectedRecipientUserId]);
 
   const sendChatMessage = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -212,7 +271,7 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
           type: "chat.send",
           payload: {
             content,
-            to_user_id: null,
+            to_user_id: selectedRecipientUserId,
           },
         })
       );
@@ -520,6 +579,8 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
     chatMessages,
     chatInput,
     chatError,
+    selectedRecipientUserId,
+    chatRecipientOptions,
     localUserId,
     hasPrerequisites,
     normalizedRoomCode,
@@ -531,6 +592,8 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
     isFinalState,
     transportStatus,
     setChatInput,
+    setSelectedRecipientUserId,
+    setSelectedRecipientFromValue,
     sendHostWaitingAction,
     sendHostKickAction,
     sendChatMessage,

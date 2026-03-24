@@ -98,6 +98,7 @@ function RoomPage() {
     chatError,
     chatInput,
     chatMessages,
+    chatRecipientOptions,
     displayedError,
     hasPrerequisites,
     hostActionError,
@@ -111,10 +112,12 @@ function RoomPage() {
     prerequisiteErrors,
     role,
     roomState,
+    selectedRecipientUserId,
     sendChatMessage,
     sendHostKickAction,
     sendHostWaitingAction,
     sessionStatus,
+    setSelectedRecipientFromValue,
     setChatInput,
     transportStatus,
     waitingUsers,
@@ -318,7 +321,7 @@ function RoomPage() {
             <div>
               <h3 className="text-sm font-semibold tracking-tight text-slate-900 dark:text-slate-100">Chat</h3>
               <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-                Public room messages for active participants and host.
+                Room chat for active participants and host. Choose Public or send privately to a user.
               </p>
             </div>
 
@@ -346,6 +349,7 @@ function RoomPage() {
                     >
                       <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
                         User {message.from_user_id ?? "Unknown"}
+                        {message.to_user_id ? ` • Private to User ${message.to_user_id}` : " • Public"}
                         {message.created_at ? ` • ${message.created_at}` : ""}
                       </p>
                       <p className="mt-1 whitespace-pre-wrap wrap-break-word text-sm text-slate-800 dark:text-slate-100">
@@ -358,6 +362,19 @@ function RoomPage() {
             </div>
 
             <form onSubmit={sendChatMessage} className="flex flex-col gap-3 sm:flex-row">
+              <select
+                value={selectedRecipientUserId === null ? "public" : String(selectedRecipientUserId)}
+                onChange={(event) => setSelectedRecipientFromValue(event.target.value)}
+                disabled={!canSendChat || !isSocketOpen}
+                className="h-11 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none transition duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-500 dark:focus:ring-blue-900/40"
+              >
+                <option value="public">Public</option>
+                {chatRecipientOptions.map((option) => (
+                  <option key={option.userId} value={option.userId}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
               <input
                 type="text"
                 value={chatInput}
