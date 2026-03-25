@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { parsePositiveInteger } from "../lib/roomMessageParsers";
 import { type SessionStatus, useRoomSocket } from "../hooks/useRoomSocket";
@@ -109,7 +110,6 @@ function RoomPage() {
     lastMessageType,
     localUserId,
     normalizedRoomCode,
-    prerequisiteErrors,
     role,
     roomState,
     selectedRecipientUserId,
@@ -131,36 +131,14 @@ function RoomPage() {
   const stateContent = getSessionStateContent(sessionStatus, displayedError);
   const toneClasses = getToneClasses(stateContent.tone);
 
+  useEffect(() => {
+    if (!hasPrerequisites) {
+      navigate("/dashboard", { replace: true });
+    }
+  }, [hasPrerequisites, navigate]);
+
   if (!hasPrerequisites) {
-    return (
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
-        <div className="mx-auto max-w-3xl space-y-6 px-4 py-8">
-          <header className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-            <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Meeting Room</h1>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              We could not initialize your room session.
-            </p>
-          </header>
-
-          <section className="rounded-xl border border-red-200 bg-red-50 p-5 dark:border-red-900/40 dark:bg-red-950/30">
-            <p className="text-sm font-medium text-red-700 dark:text-red-300">Cannot open room connection.</p>
-            <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-red-700 dark:text-red-300">
-              {prerequisiteErrors.map((error) => (
-                <li key={error}>{error}</li>
-              ))}
-            </ul>
-          </section>
-
-          <button
-            type="button"
-            onClick={() => navigate("/dashboard")}
-            className="inline-flex h-11 items-center justify-center rounded-lg bg-black px-5 text-sm font-medium text-white shadow-sm transition duration-200 hover:bg-neutral-800 dark:bg-blue-900 dark:hover:bg-blue-800"
-          >
-            Back to dashboard
-          </button>
-        </div>
-      </div>
-    );
+    return null;
   }
 
   return (

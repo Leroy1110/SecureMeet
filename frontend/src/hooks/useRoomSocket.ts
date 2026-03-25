@@ -157,6 +157,11 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
     resetRoomLocalState();
   }, [closeSocketConnection, resetRoomLocalState]);
 
+  const clearPersistedRoomSession = useCallback(() => {
+    clearRoomSessionToken();
+    setRoomToken("");
+  }, []);
+
   const socketConfig = useMemo(() => {
     if (!hasPrerequisites) {
       return { url: "", error: "" };
@@ -494,6 +499,7 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
         }
         case "waiting.rejected": {
           lastOutgoingMessageTypeRef.current = null;
+          clearPersistedRoomSession();
           setRoomState("rejected");
           setSessionStatus("rejected");
           setLastError("You were not admitted to this room.");
@@ -527,6 +533,7 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
         }
         case "system.kicked": {
           lastOutgoingMessageTypeRef.current = null;
+          clearPersistedRoomSession();
           const message = isJsonRecord(payloadValue)
             ? pickString(payloadValue, ["message", "detail", "error"])
             : "";
@@ -537,6 +544,7 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
         }
         case "system.disconnected": {
           lastOutgoingMessageTypeRef.current = null;
+          clearPersistedRoomSession();
           const message = isJsonRecord(payloadValue)
             ? pickString(payloadValue, ["message", "detail", "error", "reason"])
             : "";
@@ -602,7 +610,7 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
     return () => {
       closeSocketConnection();
     };
-  }, [closeSocketConnection, hasPrerequisites, socketConfig.error, socketConfig.url]);
+  }, [clearPersistedRoomSession, closeSocketConnection, hasPrerequisites, socketConfig.error, socketConfig.url]);
 
   const displayedError = socketConfig.error || lastError;
   const transportStatus = socketConfig.error ? "error" : connectionStatus;
