@@ -1,4 +1,4 @@
-import { type Dispatch, type FormEvent, type SetStateAction, useEffect, useMemo, useRef, useState } from "react";
+import { type Dispatch, type FormEvent, type SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type JsonRecord,
   extractUserLabel,
@@ -9,7 +9,7 @@ import {
   pickString,
   readString,
 } from "../lib/roomMessageParsers";
-import { getRoomSessionToken, readUserIdFromToken } from "../lib/roomSession";
+import { clearRoomSessionToken, getRoomSessionToken, readUserIdFromToken } from "../lib/roomSession";
 import { buildRoomSocketUrl } from "../lib/roomSocket";
 
 export type ConnectionStatus = "connecting" | "open" | "connected" | "closed" | "error";
@@ -66,6 +66,7 @@ export type UseRoomSocketResult = {
   sendHostWaitingAction: (messageType: "waiting.approve" | "waiting.reject", userLabel: string) => void;
   sendHostKickAction: (userLabel: string) => void;
   sendChatMessage: (event: FormEvent<HTMLFormElement>) => void;
+  leaveRoom: () => void;
 };
 
 const FINAL_SESSION_STATUSES: SessionStatus[] = ["rejected", "kicked", "disconnected", "error"];
@@ -86,7 +87,7 @@ const removeUser = (previousUsers: string[], user: string): string[] =>
   previousUsers.filter((existingUser) => existingUser !== user);
 
 export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketResult => {
-  const roomToken = getRoomSessionToken();
+  const [roomToken, setRoomToken] = useState(() => getRoomSessionToken());
   const normalizedRoomCode = roomCode?.trim() ?? "";
   const hasPrerequisites = Boolean(normalizedRoomCode && roomToken);
 
@@ -107,6 +108,54 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
   const [localUserId, setLocalUserId] = useState<number | null>(() => readUserIdFromToken(roomToken));
   const socketRef = useRef<WebSocket | null>(null);
   const lastOutgoingMessageTypeRef = useRef<OutgoingMessageType | null>(null);
+
+  const resetRoomLocalState = useCallback(() => {
+    setConnectionStatus("closed");
+    setSessionStatus("unknown");
+    setRole("");
+    setRoomState("");
+    setWaitingUsers([]);
+    setActiveUsers([]);
+    setLastMessageType("");
+    setLastError("");
+    setHostActionError("");
+    setHostActionPendingKey("");
+    setChatMessages([]);
+    setChatInput("");
+    setChatError("");
+    setSelectedRecipientUserId(null);
+    setLocalUserId(null);
+  }, []);
+
+  const closeSocketConnection = useCallback(() => {
+    const socket = socketRef.current;
+    socketRef.current = null;
+
+    if (!socket) {
+      return;
+    }
+
+    socket.onopen = null;
+    socket.onclose = null;
+    socket.onerror = null;
+    socket.onmessage = null;
+
+    if (socket.readyState === WebSocket.CONNECTING || socket.readyState === WebSocket.OPEN) {
+      try {
+        socket.close();
+      } catch (error){
+        console.error("Failed to close room socket during leave/cleanup.", error);
+      }
+    }
+  }, []);
+
+  const leaveRoom = useCallback(() => {
+    lastOutgoingMessageTypeRef.current = null;
+    closeSocketConnection();
+    clearRoomSessionToken();
+    setRoomToken("");
+    resetRoomLocalState();
+  }, [closeSocketConnection, resetRoomLocalState]);
 
   const socketConfig = useMemo(() => {
     if (!hasPrerequisites) {
@@ -551,14 +600,9 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
     };
 
     return () => {
-      socketRef.current = null;
-      socket.onopen = null;
-      socket.onclose = null;
-      socket.onerror = null;
-      socket.onmessage = null;
-      socket.close();
+      closeSocketConnection();
     };
-  }, [hasPrerequisites, socketConfig.error, socketConfig.url]);
+  }, [closeSocketConnection, hasPrerequisites, socketConfig.error, socketConfig.url]);
 
   const displayedError = socketConfig.error || lastError;
   const transportStatus = socketConfig.error ? "error" : connectionStatus;
@@ -597,5 +641,6 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
     sendHostWaitingAction,
     sendHostKickAction,
     sendChatMessage,
+    leaveRoom,
   };
 };

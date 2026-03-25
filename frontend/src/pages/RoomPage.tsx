@@ -116,12 +116,17 @@ function RoomPage() {
     sendChatMessage,
     sendHostKickAction,
     sendHostWaitingAction,
+    leaveRoom,
     sessionStatus,
     setSelectedRecipientFromValue,
     setChatInput,
     transportStatus,
     waitingUsers,
   } = useRoomSocket({ roomCode });
+  const handleLeaveRoom = () => {
+    leaveRoom();
+    navigate("/dashboard");
+  };
 
   const stateContent = getSessionStateContent(sessionStatus, displayedError);
   const toneClasses = getToneClasses(stateContent.tone);
@@ -162,10 +167,21 @@ function RoomPage() {
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
       <div className="mx-auto max-w-3xl space-y-6 px-4 py-8">
         <header className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Meeting Room</h1>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            SecureMeet room access and real-time session status.
-          </p>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Meeting Room</h1>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                SecureMeet room access and real-time session status.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleLeaveRoom}
+              className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 shadow-sm transition duration-200 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+            >
+              Leave room
+            </button>
+          </div>
         </header>
 
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -211,7 +227,7 @@ function RoomPage() {
             <div className="mt-6">
               <button
                 type="button"
-                onClick={() => navigate("/dashboard")}
+                onClick={handleLeaveRoom}
                 className="inline-flex h-11 items-center justify-center rounded-lg bg-black px-5 text-sm font-medium text-white shadow-sm transition duration-200 hover:bg-neutral-800 dark:bg-blue-900 dark:hover:bg-blue-800"
               >
                 Return to dashboard
