@@ -11,7 +11,10 @@ from app.db.models import Room, RoomMember, User
 from app.rooms.schemas import normalize_room_display_name
 
 
-def _resolve_display_name_for_user(db: Session, user_id: int, requested_display_name: str | None) -> str:
+def _resolve_display_name_for_user(
+        db: Session,
+        user_id: int,
+        requested_display_name: str | None) -> str:
     user = db.query(User).filter(User.id == user_id).first()
     if user is None:
         raise ValueError("User not found")
@@ -47,7 +50,8 @@ def create_room(
     )
 
     try:
-        resolved_host_display_name = _resolve_display_name_for_user(db, host_user_id, host_display_name)
+        resolved_host_display_name = _resolve_display_name_for_user(
+            db, host_user_id, host_display_name)
     except ValueError as error:
         raise RuntimeError(str(error)) from error
 
@@ -122,7 +126,8 @@ def join_room(
     ):
         raise ValueError("Already joined")
 
-    count_members = db.query(RoomMember).filter_by(room_id=room.id, state="active").count()
+    count_members = db.query(RoomMember).filter_by(
+        room_id=room.id, state="active").count()
     if count_members >= room.max_participants:
         raise ValueError("Room is full")
 
@@ -159,7 +164,11 @@ def join_room(
         raise RuntimeError("Failed to join room") from error
 
 
-def update_room_member_display_name(db: Session, room_code: str, user_id: int, display_name: str) -> str:
+def update_room_member_display_name(
+        db: Session,
+        room_code: str,
+        user_id: int,
+        display_name: str) -> str:
     normalized_room_code = room_code.strip()
     normalized_display_name = normalize_room_display_name(display_name)
 
@@ -202,7 +211,9 @@ def update_user_state(
     new_state: str,
     left_at: datetime | None = None,
 ) -> bool:
-    room_member = db.query(RoomMember).filter(RoomMember.room_id == room_id, RoomMember.user_id == user_id).first()
+    room_member = db.query(RoomMember).filter(
+        RoomMember.room_id == room_id,
+        RoomMember.user_id == user_id).first()
 
     if not room_member:
         raise ValueError("RoomMember not found")
@@ -229,7 +240,9 @@ def update_user_state(
 
 
 def mark_member_left(db: Session, room_id: int, user_id: int) -> None:
-    room_member = db.query(RoomMember).filter(RoomMember.room_id == room_id, RoomMember.user_id == user_id).first()
+    room_member = db.query(RoomMember).filter(
+        RoomMember.room_id == room_id,
+        RoomMember.user_id == user_id).first()
 
     if room_member is None:
         return
@@ -248,7 +261,9 @@ def mark_member_left(db: Session, room_id: int, user_id: int) -> None:
 
 
 def mark_member_kicked(db: Session, room_id: int, user_id: int) -> None:
-    room_member = db.query(RoomMember).filter(RoomMember.room_id == room_id, RoomMember.user_id == user_id).first()
+    room_member = db.query(RoomMember).filter(
+        RoomMember.room_id == room_id,
+        RoomMember.user_id == user_id).first()
 
     if room_member is None:
         return

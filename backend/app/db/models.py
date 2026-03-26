@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
 from sqlalchemy.sql import func
 from app.db.base import Base
 
+
 class User(Base):
     __tablename__ = "users"
 
@@ -10,6 +11,7 @@ class User(Base):
     username = Column(String(50), unique=True, index=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
     created_at = Column(DateTime, nullable=False, default=func.now())
+
 
 class Room(Base):
     __tablename__ = "rooms"
@@ -24,6 +26,7 @@ class Room(Base):
     expires_at = Column(DateTime, nullable=False)
     encryption_key_encrypted = Column(String, nullable=False)
 
+
 class RoomMember(Base):
     __tablename__ = "room_members"
 
@@ -36,6 +39,7 @@ class RoomMember(Base):
     joined_at = Column(DateTime, nullable=True)
     left_at = Column(DateTime, nullable=True)
 
+
 class Message(Base):
     __tablename__ = "messages"
 
@@ -46,6 +50,7 @@ class Message(Base):
     content_encrypted = Column(Text, nullable=False)
     created_at = Column(DateTime, nullable=False, default=func.now())
     msg_type = Column(String, nullable=False)
+
 
 class EventLog(Base):
     __tablename__ = "events_log"

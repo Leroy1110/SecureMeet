@@ -13,7 +13,8 @@ def normalize_room_display_name(value: str | None) -> str | None:
         raise ValueError("Display name cannot be empty.")
 
     if len(normalized) > ROOM_DISPLAY_NAME_MAX_LENGTH:
-        raise ValueError(f"Display name cannot exceed {ROOM_DISPLAY_NAME_MAX_LENGTH} characters.")
+        raise ValueError(
+            f"Display name cannot exceed {ROOM_DISPLAY_NAME_MAX_LENGTH} characters.")
 
     return normalized
 
