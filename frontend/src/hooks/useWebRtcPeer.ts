@@ -54,6 +54,11 @@ export const useWebRtcPeer = (): UseWebRtcPeerResult => {
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const fallbackRemoteStreamRef = useRef<MediaStream | null>(null);
 
+  const isPeerConnectionReusable = (connection: RTCPeerConnection): boolean =>
+    connection.connectionState !== "closed" &&
+    connection.connectionState !== "failed" &&
+    connection.iceConnectionState !== "failed";
+
   const closePeerConnection = useCallback(() => {
     const currentPeerConnection = peerConnectionRef.current;
     peerConnectionRef.current = null;
@@ -82,13 +87,17 @@ export const useWebRtcPeer = (): UseWebRtcPeerResult => {
   const createPeerConnection = useCallback(
     (localStream: MediaStream | null): RTCPeerConnection | null => {
       const existingPeerConnection = peerConnectionRef.current;
-      if (existingPeerConnection && existingPeerConnection.connectionState !== "closed") {
+      if (existingPeerConnection && isPeerConnectionReusable(existingPeerConnection)) {
         try {
           addLocalTracks(existingPeerConnection, localStream);
         } catch (error) {
           setRtcError(toRtcErrorMessage(error, "Failed to attach local media tracks."));
         }
         return existingPeerConnection;
+      }
+
+      if (existingPeerConnection) {
+        closePeerConnection();
       }
 
       try {
@@ -144,7 +153,7 @@ export const useWebRtcPeer = (): UseWebRtcPeerResult => {
         return null;
       }
     },
-    []
+    [closePeerConnection]
   );
 
   useEffect(() => {

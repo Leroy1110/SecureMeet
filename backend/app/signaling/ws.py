@@ -218,6 +218,15 @@ async def _relay_webrtc_payload(
         })
         return
 
+    if target_user_id == sender_user_id:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "cannot send webrtc signaling to yourself"
+            }
+        })
+        return
+
     recipient_ws = _resolve_active_recipient_ws(
         room_state=room_state,
         recipient_user_id=target_user_id,

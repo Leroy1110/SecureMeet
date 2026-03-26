@@ -164,10 +164,12 @@ function RoomPage() {
   const preferencesMediaDisabled = !audioEnabled && !videoEnabled;
   const localPreviewVideoRef = useRef<HTMLVideoElement | null>(null);
   const remotePreviewVideoRef = useRef<HTMLVideoElement | null>(null);
+  const remotePreviewAudioRef = useRef<HTMLAudioElement | null>(null);
   const activeRtcPeerUserIdRef = useRef<number | null>(null);
   const pendingRemoteIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const hasInitiatedOfferRef = useRef(false);
   const [rtcFlowError, setRtcFlowError] = useState("");
+  const [rtcTargetUserId, setRtcTargetUserId] = useState<number | null>(null);
   const {
     localStream,
     mediaLoading,
@@ -199,14 +201,10 @@ function RoomPage() {
         .sort((left, right) => left - right),
     [activeUsers]
   );
-  const rtcTargetUserId = useMemo(() => {
-    if (localUserId === null) {
-      return null;
-    }
-
-    const targetUserId = availableActivePeerUserIds.find((userId) => userId !== localUserId);
-    return targetUserId ?? null;
-  }, [availableActivePeerUserIds, localUserId]);
+  const availableRtcTargetUserIds = useMemo(
+    () => availableActivePeerUserIds.filter((userId) => userId !== localUserId),
+    [availableActivePeerUserIds, localUserId]
+  );
 
   const handleLeaveRoom = () => {
     closePeerConnection();
@@ -260,10 +258,55 @@ function RoomPage() {
   }, [hasRemoteVideoTrack, remoteStream]);
 
   useEffect(() => {
+    const audioElement = remotePreviewAudioRef.current;
+    if (!audioElement) {
+      return;
+    }
+
+    audioElement.srcObject = hasRemoteAudioTrack && !hasRemoteVideoTrack ? remoteStream : null;
+
+    return () => {
+      audioElement.srcObject = null;
+    };
+  }, [hasRemoteAudioTrack, hasRemoteVideoTrack, remoteStream]);
+
+  useEffect(() => {
+    if (!canSendWebRtc || !isSocketOpen || localUserId === null) {
+      setRtcTargetUserId(null);
+      return;
+    }
+
+    if (rtcTargetUserId !== null) {
+      if (availableRtcTargetUserIds.includes(rtcTargetUserId)) {
+        return;
+      }
+
+      setRtcTargetUserId(null);
+      return;
+    }
+
+    const nextTargetUserId = availableRtcTargetUserIds[0] ?? null;
+    if (nextTargetUserId !== null) {
+      setRtcTargetUserId(nextTargetUserId);
+    }
+  }, [availableRtcTargetUserIds, canSendWebRtc, isSocketOpen, localUserId, rtcTargetUserId]);
+
+  useEffect(() => {
     return () => {
       closePeerConnection();
     };
   }, [closePeerConnection]);
+
+  useEffect(() => {
+    if (rtcConnectionState !== "failed") {
+      return;
+    }
+
+    pendingRemoteIceCandidatesRef.current = [];
+    hasInitiatedOfferRef.current = false;
+    setRtcFlowError("");
+    closePeerConnection();
+  }, [closePeerConnection, rtcConnectionState]);
 
   useEffect(() => {
     const resolvedLocalUserId = localUserId;
@@ -345,6 +388,7 @@ function RoomPage() {
     isSocketOpen,
     localStream,
     localUserId,
+    peerConnection,
     rtcTargetUserId,
     sendWebRtcOffer,
   ]);
@@ -649,7 +693,10 @@ function RoomPage() {
                     className="aspect-video w-full rounded-lg bg-black object-cover"
                   />
                 ) : hasRemoteAudioTrack ? (
-                  <p className="text-sm text-slate-700 dark:text-slate-200">Remote microphone is connected. Camera is off.</p>
+                  <div className="space-y-2">
+                    <audio ref={remotePreviewAudioRef} autoPlay />
+                    <p className="text-sm text-slate-700 dark:text-slate-200">Remote microphone is connected. Camera is off.</p>
+                  </div>
                 ) : (
                   <p className="text-sm text-slate-700 dark:text-slate-200">Waiting for remote media.</p>
                 )}
