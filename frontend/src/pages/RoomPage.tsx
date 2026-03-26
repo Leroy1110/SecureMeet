@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useLocalMedia } from "../hooks/useLocalMedia";
 import { type RoomPresenceUser, type SessionStatus, useRoomSocket } from "../hooks/useRoomSocket";
+import { useWebRtcPeer } from "../hooks/useWebRtcPeer";
 import { getRoomEntryPreferences } from "../lib/roomEntryPreferences";
 
 type StatusTone = "neutral" | "success" | "warning" | "danger";
@@ -103,12 +104,25 @@ const getPresenceUserLabel = (user: RoomPresenceUser): string => {
   return "Unknown user";
 };
 
+const toErrorMessage = (error: unknown, fallbackMessage: string): string => {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+
+  if (typeof error === "string" && error.trim()) {
+    return error;
+  }
+
+  return fallbackMessage;
+};
+
 function RoomPage() {
   const navigate = useNavigate();
   const { roomCode } = useParams<{ roomCode: string }>();
   const {
     activeUsers,
     canSendChat,
+    canSendWebRtc,
     chatError,
     chatInput,
     chatMessages,
@@ -121,6 +135,7 @@ function RoomPage() {
     isHost,
     isSocketOpen,
     lastMessageType,
+    lastWebRtcSignal,
     localUserId,
     normalizedRoomCode,
     role,
@@ -129,6 +144,9 @@ function RoomPage() {
     sendChatMessage,
     sendHostKickAction,
     sendHostWaitingAction,
+    sendWebRtcAnswer,
+    sendWebRtcIceCandidate,
+    sendWebRtcOffer,
     leaveRoom,
     sessionStatus,
     setSelectedRecipientFromValue,
@@ -145,6 +163,11 @@ function RoomPage() {
   const shouldStartLocalMedia = role === "host" || sessionStatus === "active";
   const preferencesMediaDisabled = !audioEnabled && !videoEnabled;
   const localPreviewVideoRef = useRef<HTMLVideoElement | null>(null);
+  const remotePreviewVideoRef = useRef<HTMLVideoElement | null>(null);
+  const activeRtcPeerUserIdRef = useRef<number | null>(null);
+  const pendingRemoteIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
+  const hasInitiatedOfferRef = useRef(false);
+  const [rtcFlowError, setRtcFlowError] = useState("");
   const {
     localStream,
     mediaLoading,
@@ -154,8 +177,39 @@ function RoomPage() {
     startLocalMedia,
     stopLocalMedia,
   } = useLocalMedia();
+  const {
+    peerConnection,
+    remoteStream,
+    rtcError,
+    rtcConnectionState,
+    createPeerConnection,
+    closePeerConnection,
+  } = useWebRtcPeer();
+
+  const hasLocalVideoTrack = Boolean(localStream?.getVideoTracks().length);
+  const hasLocalAudioTrack = Boolean(localStream?.getAudioTracks().length);
+  const hasRemoteVideoTrack = Boolean(remoteStream?.getVideoTracks().length);
+  const hasRemoteAudioTrack = Boolean(remoteStream?.getAudioTracks().length);
+  const displayedRtcError = rtcFlowError || rtcError;
+  const availableActivePeerUserIds = useMemo(
+    () =>
+      activeUsers
+        .map((user) => user.userId)
+        .filter((userId): userId is number => userId !== null && userId > 0)
+        .sort((left, right) => left - right),
+    [activeUsers]
+  );
+  const rtcTargetUserId = useMemo(() => {
+    if (localUserId === null) {
+      return null;
+    }
+
+    const targetUserId = availableActivePeerUserIds.find((userId) => userId !== localUserId);
+    return targetUserId ?? null;
+  }, [availableActivePeerUserIds, localUserId]);
 
   const handleLeaveRoom = () => {
+    closePeerConnection();
     stopLocalMedia();
     leaveRoom();
     navigate("/dashboard");
@@ -185,12 +239,256 @@ function RoomPage() {
       return;
     }
 
-    videoElement.srcObject = localStream;
+    videoElement.srcObject = hasLocalVideoTrack ? localStream : null;
 
     return () => {
       videoElement.srcObject = null;
     };
-  }, [localStream]);
+  }, [hasLocalVideoTrack, localStream]);
+
+  useEffect(() => {
+    const videoElement = remotePreviewVideoRef.current;
+    if (!videoElement) {
+      return;
+    }
+
+    videoElement.srcObject = hasRemoteVideoTrack ? remoteStream : null;
+
+    return () => {
+      videoElement.srcObject = null;
+    };
+  }, [hasRemoteVideoTrack, remoteStream]);
+
+  useEffect(() => {
+    return () => {
+      closePeerConnection();
+    };
+  }, [closePeerConnection]);
+
+  useEffect(() => {
+    const resolvedLocalUserId = localUserId;
+    const resolvedTargetUserId = rtcTargetUserId;
+    const canParticipateInRtc =
+      canSendWebRtc && isSocketOpen && resolvedLocalUserId !== null && resolvedTargetUserId !== null;
+
+    if (!canParticipateInRtc) {
+      activeRtcPeerUserIdRef.current = null;
+      pendingRemoteIceCandidatesRef.current = [];
+      hasInitiatedOfferRef.current = false;
+      setRtcFlowError("");
+      closePeerConnection();
+      return;
+    }
+
+    if (activeRtcPeerUserIdRef.current !== resolvedTargetUserId) {
+      activeRtcPeerUserIdRef.current = resolvedTargetUserId;
+      pendingRemoteIceCandidatesRef.current = [];
+      hasInitiatedOfferRef.current = false;
+      setRtcFlowError("");
+      closePeerConnection();
+    }
+
+    const currentPeerConnection = createPeerConnection(localStream);
+    if (!currentPeerConnection) {
+      setRtcFlowError("Unable to initialize WebRTC connection.");
+      return;
+    }
+
+    if (resolvedLocalUserId >= resolvedTargetUserId || hasInitiatedOfferRef.current) {
+      return;
+    }
+
+    hasInitiatedOfferRef.current = true;
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        if (currentPeerConnection.signalingState !== "stable") {
+          hasInitiatedOfferRef.current = false;
+          return;
+        }
+
+        const offer = await currentPeerConnection.createOffer();
+        await currentPeerConnection.setLocalDescription(offer);
+        const localSdp = currentPeerConnection.localDescription?.sdp?.trim() ?? "";
+        if (!localSdp) {
+          throw new Error("Failed to create local WebRTC offer.");
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        const didSendOffer = sendWebRtcOffer(resolvedTargetUserId, localSdp);
+        if (!didSendOffer) {
+          hasInitiatedOfferRef.current = false;
+          setRtcFlowError("Unable to send WebRTC offer to the remote participant.");
+          return;
+        }
+
+        setRtcFlowError("");
+      } catch (error) {
+        hasInitiatedOfferRef.current = false;
+        if (!cancelled) {
+          setRtcFlowError(toErrorMessage(error, "Failed to create or send a WebRTC offer."));
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    canSendWebRtc,
+    closePeerConnection,
+    createPeerConnection,
+    isSocketOpen,
+    localStream,
+    localUserId,
+    rtcTargetUserId,
+    sendWebRtcOffer,
+  ]);
+
+  useEffect(() => {
+    if (!lastWebRtcSignal || !canSendWebRtc || !isSocketOpen) {
+      return;
+    }
+
+    const resolvedLocalUserId = localUserId;
+    const resolvedTargetUserId = activeRtcPeerUserIdRef.current;
+    if (resolvedLocalUserId === null || resolvedTargetUserId === null) {
+      return;
+    }
+
+    if (lastWebRtcSignal.toUserId !== null && lastWebRtcSignal.toUserId !== resolvedLocalUserId) {
+      return;
+    }
+
+    if (lastWebRtcSignal.fromUserId !== resolvedTargetUserId) {
+      return;
+    }
+
+    const currentPeerConnection = createPeerConnection(localStream);
+    if (!currentPeerConnection) {
+      setRtcFlowError("Unable to process WebRTC signaling because peer connection initialization failed.");
+      return;
+    }
+
+    const flushPendingIceCandidates = async () => {
+      if (!currentPeerConnection.remoteDescription) {
+        return;
+      }
+
+      const pendingCandidates = [...pendingRemoteIceCandidatesRef.current];
+      pendingRemoteIceCandidatesRef.current = [];
+
+      for (const candidate of pendingCandidates) {
+        await currentPeerConnection.addIceCandidate(candidate);
+      }
+    };
+
+    void (async () => {
+      try {
+        switch (lastWebRtcSignal.type) {
+          case "webrtc.offer": {
+            if (resolvedLocalUserId < lastWebRtcSignal.fromUserId) {
+              return;
+            }
+
+            const remoteSdp = lastWebRtcSignal.sdp?.trim() ?? "";
+            if (!remoteSdp || currentPeerConnection.signalingState !== "stable") {
+              return;
+            }
+
+            await currentPeerConnection.setRemoteDescription({
+              type: "offer",
+              sdp: remoteSdp,
+            });
+            await flushPendingIceCandidates();
+
+            const answer = await currentPeerConnection.createAnswer();
+            await currentPeerConnection.setLocalDescription(answer);
+            const localSdp = currentPeerConnection.localDescription?.sdp?.trim() ?? "";
+            if (!localSdp) {
+              throw new Error("Failed to create local WebRTC answer.");
+            }
+
+            const didSendAnswer = sendWebRtcAnswer(lastWebRtcSignal.fromUserId, localSdp);
+            if (!didSendAnswer) {
+              setRtcFlowError("Unable to send WebRTC answer to the remote participant.");
+              return;
+            }
+
+            setRtcFlowError("");
+            break;
+          }
+          case "webrtc.answer": {
+            const remoteSdp = lastWebRtcSignal.sdp?.trim() ?? "";
+            if (!remoteSdp || currentPeerConnection.signalingState === "closed") {
+              return;
+            }
+
+            await currentPeerConnection.setRemoteDescription({
+              type: "answer",
+              sdp: remoteSdp,
+            });
+            await flushPendingIceCandidates();
+            setRtcFlowError("");
+            break;
+          }
+          case "webrtc.ice_candidate": {
+            const candidate = lastWebRtcSignal.candidate;
+            if (!candidate) {
+              return;
+            }
+
+            if (!currentPeerConnection.remoteDescription) {
+              pendingRemoteIceCandidatesRef.current.push(candidate);
+              return;
+            }
+
+            await currentPeerConnection.addIceCandidate(candidate);
+            setRtcFlowError("");
+            break;
+          }
+          default:
+            break;
+        }
+      } catch (error) {
+        setRtcFlowError(toErrorMessage(error, "Failed to apply incoming WebRTC signaling data."));
+      }
+    })();
+  }, [
+    canSendWebRtc,
+    createPeerConnection,
+    isSocketOpen,
+    lastWebRtcSignal,
+    localStream,
+    localUserId,
+    sendWebRtcAnswer,
+  ]);
+
+  useEffect(() => {
+    if (!peerConnection || !canSendWebRtc || !isSocketOpen || rtcTargetUserId === null) {
+      return;
+    }
+
+    peerConnection.onicecandidate = (event) => {
+      if (!event.candidate) {
+        return;
+      }
+
+      const candidate = event.candidate.toJSON();
+      const didSendCandidate = sendWebRtcIceCandidate(rtcTargetUserId, candidate);
+      if (!didSendCandidate) {
+        setRtcFlowError("Unable to send WebRTC ICE candidate.");
+      }
+    };
+
+    return () => {
+      peerConnection.onicecandidate = null;
+    };
+  }, [canSendWebRtc, isSocketOpen, peerConnection, rtcTargetUserId, sendWebRtcIceCandidate]);
 
   if (!hasPrerequisites) {
     return null;
@@ -296,35 +594,70 @@ function RoomPage() {
               </p>
             </div>
 
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-800">
-              {localStream ? (
-                <div className="space-y-2">
+            {displayedRtcError ? (
+              <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-300">
+                {displayedRtcError}
+              </p>
+            ) : null}
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-800">
+                <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Local preview
+                </p>
+                {hasLocalVideoTrack ? (
+                  <div className="space-y-2">
+                    <video
+                      ref={localPreviewVideoRef}
+                      autoPlay
+                      muted
+                      playsInline
+                      className="aspect-video w-full rounded-lg bg-black object-cover"
+                    />
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      {mediaReady ? "Local video and audio are ready." : "Preparing local preview."}
+                    </p>
+                  </div>
+                ) : hasLocalAudioTrack ? (
+                  <p className="text-sm text-slate-700 dark:text-slate-200">Microphone is ready. Camera is off.</p>
+                ) : mediaDisabled || preferencesMediaDisabled ? (
+                  <p className="text-sm text-slate-700 dark:text-slate-200">Media is disabled in your join preferences.</p>
+                ) : mediaLoading ? (
+                  <p className="text-sm text-slate-700 dark:text-slate-200">Starting your camera and microphone preview...</p>
+                ) : mediaError ? (
+                  <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-300">
+                    {mediaError}
+                  </p>
+                ) : shouldStartLocalMedia ? (
+                  <p className="text-sm text-slate-700 dark:text-slate-200">Preparing local media preview...</p>
+                ) : (
+                  <p className="text-sm text-slate-700 dark:text-slate-200">
+                    Local media preview will start once your room session is active.
+                  </p>
+                )}
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-800">
+                <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Remote preview
+                </p>
+                {hasRemoteVideoTrack ? (
                   <video
-                    ref={localPreviewVideoRef}
+                    ref={remotePreviewVideoRef}
                     autoPlay
-                    muted
                     playsInline
                     className="aspect-video w-full rounded-lg bg-black object-cover"
                   />
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    {mediaReady ? "Local media is ready." : "Preparing local preview."}
-                  </p>
-                </div>
-              ) : mediaDisabled || preferencesMediaDisabled ? (
-                <p className="text-sm text-slate-700 dark:text-slate-200">Media is disabled in your join preferences.</p>
-              ) : mediaLoading ? (
-                <p className="text-sm text-slate-700 dark:text-slate-200">Starting your camera and microphone preview...</p>
-              ) : mediaError ? (
-                <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-300">
-                  {mediaError}
+                ) : hasRemoteAudioTrack ? (
+                  <p className="text-sm text-slate-700 dark:text-slate-200">Remote microphone is connected. Camera is off.</p>
+                ) : (
+                  <p className="text-sm text-slate-700 dark:text-slate-200">Waiting for remote media.</p>
+                )}
+
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                  Peer connection state: {formatStatusLabel(rtcConnectionState)}
                 </p>
-              ) : shouldStartLocalMedia ? (
-                <p className="text-sm text-slate-700 dark:text-slate-200">Preparing local media preview...</p>
-              ) : (
-                <p className="text-sm text-slate-700 dark:text-slate-200">
-                  Local media preview will start once you are active in this room.
-                </p>
-              )}
+              </div>
             </div>
           </div>
         </section>

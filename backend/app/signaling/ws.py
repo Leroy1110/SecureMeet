@@ -150,6 +150,265 @@ def validate_room_for_ws_connect(
     return payload_room_id, payload_user_id, room_member.role, room_member.state
 
 
+def _can_send_webrtc_signaling(
+    room_state: RoomState, sender_user_id: int, sender_role: str
+) -> bool:
+    if sender_role == "host":
+        return (
+            room_state.host_user_id == sender_user_id
+            and room_state.host_ws is not None
+        )
+
+    return sender_user_id in room_state.active_ws
+
+
+def _resolve_active_recipient_ws(
+    room_state: RoomState, recipient_user_id: int
+) -> WebSocket | None:
+    if recipient_user_id == room_state.host_user_id and room_state.host_ws is not None:
+        return room_state.host_ws
+
+    if recipient_user_id in room_state.active_ws:
+        return room_state.active_ws[recipient_user_id]
+
+    return None
+
+
+def _parse_target_user_id(payload: dict) -> int | None:
+    try:
+        target_user_id = int(payload.get("to_user_id"))
+    except (TypeError, ValueError):
+        return None
+
+    if target_user_id <= 0:
+        return None
+
+    return target_user_id
+
+
+async def _relay_webrtc_payload(
+    websocket: WebSocket,
+    room_state: RoomState,
+    sender_user_id: int,
+    sender_role: str,
+    message_type: str,
+    payload: dict,
+    relay_payload: dict,
+):
+    if not _can_send_webrtc_signaling(
+        room_state=room_state,
+        sender_user_id=sender_user_id,
+        sender_role=sender_role,
+    ):
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "only host or active users can send webrtc signaling"
+            }
+        })
+        return
+
+    target_user_id = _parse_target_user_id(payload)
+    if target_user_id is None:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "invalid to_user_id in payload"
+            }
+        })
+        return
+
+    recipient_ws = _resolve_active_recipient_ws(
+        room_state=room_state,
+        recipient_user_id=target_user_id,
+    )
+    if recipient_ws is None:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "target user is not active"
+            }
+        })
+        return
+
+    outgoing_message = {
+        "type": message_type,
+        "payload": {
+            "from_user_id": sender_user_id,
+            "to_user_id": target_user_id,
+            **relay_payload
+        }
+    }
+
+    try:
+        await recipient_ws.send_json(outgoing_message)
+    except Exception:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": f"failed to relay {message_type}"
+            }
+        })
+
+
+async def handler_webrtc_offer(
+    websocket: WebSocket,
+    room_state: RoomState,
+    room_code: str,
+    room_id: int,
+    sender_user_id: int,
+    sender_role: str,
+    payload: dict,
+    db: Session
+):
+    del room_code, room_id, db
+
+    sdp = payload.get("sdp")
+    if not isinstance(sdp, str) or sdp.strip() == "":
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "invalid sdp in payload"
+            }
+        })
+        return
+
+    await _relay_webrtc_payload(
+        websocket=websocket,
+        room_state=room_state,
+        sender_user_id=sender_user_id,
+        sender_role=sender_role,
+        message_type="webrtc.offer",
+        payload=payload,
+        relay_payload={"sdp": sdp},
+    )
+
+
+async def handler_webrtc_answer(
+    websocket: WebSocket,
+    room_state: RoomState,
+    room_code: str,
+    room_id: int,
+    sender_user_id: int,
+    sender_role: str,
+    payload: dict,
+    db: Session
+):
+    del room_code, room_id, db
+
+    sdp = payload.get("sdp")
+    if not isinstance(sdp, str) or sdp.strip() == "":
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "invalid sdp in payload"
+            }
+        })
+        return
+
+    await _relay_webrtc_payload(
+        websocket=websocket,
+        room_state=room_state,
+        sender_user_id=sender_user_id,
+        sender_role=sender_role,
+        message_type="webrtc.answer",
+        payload=payload,
+        relay_payload={"sdp": sdp},
+    )
+
+
+async def handler_webrtc_ice_candidate(
+    websocket: WebSocket,
+    room_state: RoomState,
+    room_code: str,
+    room_id: int,
+    sender_user_id: int,
+    sender_role: str,
+    payload: dict,
+    db: Session
+):
+    del room_code, room_id, db
+
+    candidate = payload.get("candidate")
+    if not isinstance(candidate, dict):
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "invalid candidate in payload"
+            }
+        })
+        return
+
+    candidate_value = candidate.get("candidate")
+    if not isinstance(candidate_value, str) or candidate_value.strip() == "":
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "invalid candidate.candidate in payload"
+            }
+        })
+        return
+
+    sdp_mid = candidate.get("sdpMid")
+    if sdp_mid is not None and not isinstance(sdp_mid, str):
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "invalid candidate.sdpMid in payload"
+            }
+        })
+        return
+
+    sdp_m_line_index = candidate.get("sdpMLineIndex")
+    if sdp_m_line_index is not None:
+        try:
+            sdp_m_line_index = int(sdp_m_line_index)
+        except (TypeError, ValueError):
+            await websocket.send_json({
+                "type": "error",
+                "payload": {
+                    "message": "invalid candidate.sdpMLineIndex in payload"
+                }
+            })
+            return
+
+        if sdp_m_line_index < 0:
+            await websocket.send_json({
+                "type": "error",
+                "payload": {
+                    "message": "invalid candidate.sdpMLineIndex in payload"
+                }
+            })
+            return
+
+    username_fragment = candidate.get("usernameFragment")
+    if username_fragment is not None and not isinstance(username_fragment, str):
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "invalid candidate.usernameFragment in payload"
+            }
+        })
+        return
+
+    normalized_candidate = {
+        "candidate": candidate_value,
+        "sdpMid": sdp_mid,
+        "sdpMLineIndex": sdp_m_line_index,
+        "usernameFragment": username_fragment,
+    }
+
+    await _relay_webrtc_payload(
+        websocket=websocket,
+        room_state=room_state,
+        sender_user_id=sender_user_id,
+        sender_role=sender_role,
+        message_type="webrtc.ice_candidate",
+        payload=payload,
+        relay_payload={"candidate": normalized_candidate},
+    )
+
+
 async def handler_approve(
     websocket: WebSocket,
     room_state: RoomState,
@@ -664,7 +923,10 @@ MESSAGE_HANDLERS = {
     "waiting.approve": handler_approve,
     "waiting.reject": handler_reject,
     "chat.send": handler_chat_send,
-    "member.kick": handler_kick
+    "member.kick": handler_kick,
+    "webrtc.offer": handler_webrtc_offer,
+    "webrtc.answer": handler_webrtc_answer,
+    "webrtc.ice_candidate": handler_webrtc_ice_candidate,
 }
 
 

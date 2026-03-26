@@ -33,6 +33,14 @@ const getMediaErrorMessage = (error: unknown): string => {
     return "Camera or microphone is already in use by another application.";
   }
 
+  if (errorName === "OverconstrainedError") {
+    return "Your selected camera or microphone settings are not supported on this device.";
+  }
+
+  if (errorName === "AbortError") {
+    return "Camera or microphone initialization was interrupted. Please try again.";
+  }
+
   return GENERIC_MEDIA_ERROR;
 };
 
@@ -105,7 +113,16 @@ export const useLocalMedia = (): UseLocalMediaResult => {
         setMediaLoading(false);
         setMediaReady(false);
         setMediaDisabled(false);
-        setMediaError(GENERIC_MEDIA_ERROR);
+        setMediaError("This browser does not support camera or microphone access.");
+        return;
+      }
+
+      if (!window.isSecureContext) {
+        setLocalStream(null);
+        setMediaLoading(false);
+        setMediaReady(false);
+        setMediaDisabled(false);
+        setMediaError("Camera and microphone require a secure connection (HTTPS or localhost).");
         return;
       }
 

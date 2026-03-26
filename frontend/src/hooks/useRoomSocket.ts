@@ -13,7 +13,8 @@ import { buildRoomSocketUrl } from "../lib/roomSocket";
 export type ConnectionStatus = "connecting" | "open" | "connected" | "closed" | "error";
 export type SessionStatus = "unknown" | "waiting" | "active" | "rejected" | "kicked" | "disconnected" | "error";
 export type HostMemberActionType = "waiting.approve" | "waiting.reject" | "member.kick";
-export type OutgoingMessageType = HostMemberActionType | "chat.send";
+export type WebRtcMessageType = "webrtc.offer" | "webrtc.answer" | "webrtc.ice_candidate";
+export type OutgoingMessageType = HostMemberActionType | "chat.send" | WebRtcMessageType;
 
 export type RoomPresenceUser = {
   userId: number | null;
@@ -33,6 +34,14 @@ export type ChatMessage = {
 export type ChatRecipientOption = {
   userId: number;
   label: string;
+};
+
+export type IncomingWebRtcSignal = {
+  type: WebRtcMessageType;
+  fromUserId: number;
+  toUserId: number | null;
+  sdp?: string;
+  candidate?: RTCIceCandidateInit;
 };
 
 export type UseRoomSocketParams = {
@@ -55,12 +64,14 @@ export type UseRoomSocketResult = {
   chatError: string;
   selectedRecipientUserId: number | null;
   chatRecipientOptions: ChatRecipientOption[];
+  lastWebRtcSignal: IncomingWebRtcSignal | null;
   localUserId: number | null;
   hasPrerequisites: boolean;
   normalizedRoomCode: string;
   prerequisiteErrors: string[];
   displayedError: string;
   canSendChat: boolean;
+  canSendWebRtc: boolean;
   isSocketOpen: boolean;
   isHost: boolean;
   isFinalState: boolean;
@@ -71,6 +82,9 @@ export type UseRoomSocketResult = {
   sendHostWaitingAction: (messageType: "waiting.approve" | "waiting.reject", userId: number | null) => void;
   sendHostKickAction: (userId: number | null) => void;
   sendChatMessage: (event: FormEvent<HTMLFormElement>) => void;
+  sendWebRtcOffer: (toUserId: number | null, sdp: string) => boolean;
+  sendWebRtcAnswer: (toUserId: number | null, sdp: string) => boolean;
+  sendWebRtcIceCandidate: (toUserId: number | null, candidate: RTCIceCandidateInit) => boolean;
   leaveRoom: () => void;
 };
 
@@ -198,6 +212,56 @@ const removeUser = (
   );
 };
 
+const parseNonNegativeInteger = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const parsedValue = Number(value);
+    if (Number.isInteger(parsedValue) && parsedValue >= 0) {
+      return parsedValue;
+    }
+  }
+
+  return null;
+};
+
+const extractRtcIceCandidate = (value: unknown): RTCIceCandidateInit | null => {
+  if (!isJsonRecord(value)) {
+    return null;
+  }
+
+  const candidateString = readString(value.candidate);
+  if (!candidateString.trim()) {
+    return null;
+  }
+
+  const sdpMidRaw = value.sdpMid;
+  const usernameFragmentRaw = value.usernameFragment;
+
+  return {
+    candidate: candidateString,
+    sdpMid: typeof sdpMidRaw === "string" ? sdpMidRaw : null,
+    sdpMLineIndex: parseNonNegativeInteger(value.sdpMLineIndex),
+    usernameFragment: typeof usernameFragmentRaw === "string" ? usernameFragmentRaw : null,
+  };
+};
+
+const normalizeOutgoingRtcCandidate = (candidate: RTCIceCandidateInit): RTCIceCandidateInit | null => {
+  const candidateString = readString(candidate.candidate);
+  if (!candidateString.trim()) {
+    return null;
+  }
+
+  return {
+    candidate: candidateString,
+    sdpMid: typeof candidate.sdpMid === "string" ? candidate.sdpMid : null,
+    sdpMLineIndex: parseNonNegativeInteger(candidate.sdpMLineIndex),
+    usernameFragment: typeof candidate.usernameFragment === "string" ? candidate.usernameFragment : null,
+  };
+};
+
 export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketResult => {
   const [roomToken, setRoomToken] = useState(() => getRoomSessionToken());
   const normalizedRoomCode = roomCode?.trim() ?? "";
@@ -217,6 +281,7 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
   const [chatInput, setChatInput] = useState("");
   const [chatError, setChatError] = useState("");
   const [selectedRecipientUserId, setSelectedRecipientUserId] = useState<number | null>(null);
+  const [lastWebRtcSignal, setLastWebRtcSignal] = useState<IncomingWebRtcSignal | null>(null);
   const [localUserId, setLocalUserId] = useState<number | null>(() => readUserIdFromToken(roomToken));
   const socketRef = useRef<WebSocket | null>(null);
   const lastOutgoingMessageTypeRef = useRef<OutgoingMessageType | null>(null);
@@ -236,6 +301,7 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
     setChatInput("");
     setChatError("");
     setSelectedRecipientUserId(null);
+    setLastWebRtcSignal(null);
     setLocalUserId(null);
   }, []);
 
@@ -357,6 +423,7 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
   };
 
   const canSendChat = sessionStatus === "active" || role === "host";
+  const canSendWebRtc = sessionStatus === "active" || role === "host";
   const isSocketOpen = connectionStatus === "open" || connectionStatus === "connected";
   const chatRecipientOptions = useMemo<ChatRecipientOption[]>(() => {
     const optionsByUserId = new Map<number, ChatRecipientOption>();
@@ -446,6 +513,85 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
       setChatError("Failed to send chat message.");
     }
   };
+
+  const sendWebRtcSignal = useCallback(
+    (
+      messageType: WebRtcMessageType,
+      payload: { to_user_id: number; sdp?: string; candidate?: RTCIceCandidateInit }
+    ): boolean => {
+      if (!canSendWebRtc) {
+        setLastError("Only host or active users can send WebRTC signaling messages.");
+        return false;
+      }
+
+      if (!payload.to_user_id || payload.to_user_id <= 0) {
+        setLastError("Cannot send WebRTC signaling message to an invalid recipient.");
+        return false;
+      }
+
+      const socket = socketRef.current;
+      if (!socket || socket.readyState !== WebSocket.OPEN || !isSocketOpen) {
+        setLastError("Cannot send WebRTC signaling while room socket is not connected.");
+        return false;
+      }
+
+      try {
+        lastOutgoingMessageTypeRef.current = messageType;
+        socket.send(
+          JSON.stringify({
+            type: messageType,
+            payload,
+          })
+        );
+        return true;
+      } catch {
+        lastOutgoingMessageTypeRef.current = null;
+        setLastError("Failed to send WebRTC signaling message.");
+        return false;
+      }
+    },
+    [canSendWebRtc, isSocketOpen]
+  );
+
+  const sendWebRtcOffer = useCallback((toUserId: number | null, sdp: string): boolean => {
+    const normalizedSdp = sdp.trim();
+    if (!toUserId || !normalizedSdp) {
+      return false;
+    }
+
+    return sendWebRtcSignal("webrtc.offer", {
+      to_user_id: toUserId,
+      sdp: normalizedSdp,
+    });
+  }, [sendWebRtcSignal]);
+
+  const sendWebRtcAnswer = useCallback((toUserId: number | null, sdp: string): boolean => {
+    const normalizedSdp = sdp.trim();
+    if (!toUserId || !normalizedSdp) {
+      return false;
+    }
+
+    return sendWebRtcSignal("webrtc.answer", {
+      to_user_id: toUserId,
+      sdp: normalizedSdp,
+    });
+  }, [sendWebRtcSignal]);
+
+  const sendWebRtcIceCandidate = useCallback((toUserId: number | null, candidate: RTCIceCandidateInit): boolean => {
+    if (!toUserId) {
+      return false;
+    }
+
+    const normalizedCandidate = normalizeOutgoingRtcCandidate(candidate);
+    if (!normalizedCandidate) {
+      return false;
+    }
+
+    return sendWebRtcSignal("webrtc.ice_candidate", {
+      to_user_id: toUserId,
+      candidate: normalizedCandidate,
+    });
+  }, [sendWebRtcSignal]);
 
   useEffect(() => {
     if (!hasPrerequisites) {
@@ -561,6 +707,47 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
         }
 
         return extractPresenceUser(record);
+      };
+
+      const resolveIncomingWebRtcSignal = (
+        type: WebRtcMessageType,
+        record: JsonRecord
+      ): IncomingWebRtcSignal | null => {
+        const fromUserId =
+          parsePositiveInteger(record.from_user_id) ??
+          parsePositiveInteger(record.fromUserId) ??
+          parsePositiveInteger(record.user_id);
+        if (!fromUserId) {
+          return null;
+        }
+
+        const toUserId = parseNullableInteger(record.to_user_id ?? record.toUserId);
+
+        if (type === "webrtc.offer" || type === "webrtc.answer") {
+          const sdp = readString(record.sdp).trim();
+          if (!sdp) {
+            return null;
+          }
+
+          return {
+            type,
+            fromUserId,
+            toUserId,
+            sdp,
+          };
+        }
+
+        const candidate = extractRtcIceCandidate(record.candidate);
+        if (!candidate) {
+          return null;
+        }
+
+        return {
+          type,
+          fromUserId,
+          toUserId,
+          candidate,
+        };
       };
 
       switch (messageType) {
@@ -705,6 +892,26 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
           }
           break;
         }
+        case "webrtc.offer":
+        case "webrtc.answer":
+        case "webrtc.ice_candidate": {
+          if (!isJsonRecord(payloadValue)) {
+            setLastError("Received malformed WebRTC signaling payload.");
+            break;
+          }
+
+          const signal = resolveIncomingWebRtcSignal(messageType, payloadValue);
+          if (!signal) {
+            setLastError("Received invalid WebRTC signaling payload.");
+            break;
+          }
+
+          setLastWebRtcSignal(signal);
+          if (lastOutgoingMessageTypeRef.current === messageType) {
+            lastOutgoingMessageTypeRef.current = null;
+          }
+          break;
+        }
         case "error": {
           const message = isJsonRecord(payloadValue)
             ? pickString(payloadValue, ["message", "detail", "error"])
@@ -719,6 +926,19 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
 
           if (isChatRelatedError) {
             setChatError(message || "Failed to send chat message.");
+            lastOutgoingMessageTypeRef.current = null;
+            break;
+          }
+
+          const isWebRtcRelatedError =
+            lastOutgoingMessageTypeRef.current === "webrtc.offer" ||
+            lastOutgoingMessageTypeRef.current === "webrtc.answer" ||
+            lastOutgoingMessageTypeRef.current === "webrtc.ice_candidate" ||
+            normalizedMessage.includes("webrtc") ||
+            normalizedMessage.includes("sdp") ||
+            normalizedMessage.includes("candidate");
+          if (isWebRtcRelatedError) {
+            setLastError(message || "Failed to exchange WebRTC signaling data.");
             lastOutgoingMessageTypeRef.current = null;
             break;
           }
@@ -758,12 +978,14 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
     chatError,
     selectedRecipientUserId,
     chatRecipientOptions,
+    lastWebRtcSignal,
     localUserId,
     hasPrerequisites,
     normalizedRoomCode,
     prerequisiteErrors,
     displayedError,
     canSendChat,
+    canSendWebRtc,
     isSocketOpen,
     isHost,
     isFinalState,
@@ -774,6 +996,9 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
     sendHostWaitingAction,
     sendHostKickAction,
     sendChatMessage,
+    sendWebRtcOffer,
+    sendWebRtcAnswer,
+    sendWebRtcIceCandidate,
     leaveRoom,
   };
 };
