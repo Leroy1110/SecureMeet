@@ -1,5 +1,6 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { useLocalMedia } from "../hooks/useLocalMedia";
 import { type RoomPresenceUser, type SessionStatus, useRoomSocket } from "../hooks/useRoomSocket";
 import { getRoomEntryPreferences } from "../lib/roomEntryPreferences";
 
@@ -135,23 +136,61 @@ function RoomPage() {
     transportStatus,
     waitingUsers,
   } = useRoomSocket({ roomCode });
+  const roomEntryPreferences = useMemo(
+    () => getRoomEntryPreferences(normalizedRoomCode),
+    [normalizedRoomCode]
+  );
+  const audioEnabled = roomEntryPreferences?.audioEnabled ?? true;
+  const videoEnabled = roomEntryPreferences?.videoEnabled ?? true;
+  const shouldStartLocalMedia = role === "host" || sessionStatus === "active";
+  const preferencesMediaDisabled = !audioEnabled && !videoEnabled;
+  const localPreviewVideoRef = useRef<HTMLVideoElement | null>(null);
+  const {
+    localStream,
+    mediaLoading,
+    mediaError,
+    mediaReady,
+    mediaDisabled,
+    startLocalMedia,
+    stopLocalMedia,
+  } = useLocalMedia();
+
   const handleLeaveRoom = () => {
+    stopLocalMedia();
     leaveRoom();
     navigate("/dashboard");
   };
 
   const stateContent = getSessionStateContent(sessionStatus, displayedError);
   const toneClasses = getToneClasses(stateContent.tone);
-  const roomEntryPreferences = useMemo(
-    () => getRoomEntryPreferences(normalizedRoomCode),
-    [normalizedRoomCode]
-  );
 
   useEffect(() => {
     if (!hasPrerequisites) {
       navigate("/dashboard", { replace: true });
     }
   }, [hasPrerequisites, navigate]);
+
+  useEffect(() => {
+    if (!shouldStartLocalMedia) {
+      stopLocalMedia();
+      return;
+    }
+
+    void startLocalMedia({ audioEnabled, videoEnabled });
+  }, [audioEnabled, shouldStartLocalMedia, startLocalMedia, stopLocalMedia, videoEnabled]);
+
+  useEffect(() => {
+    const videoElement = localPreviewVideoRef.current;
+    if (!videoElement) {
+      return;
+    }
+
+    videoElement.srcObject = localStream;
+
+    return () => {
+      videoElement.srcObject = null;
+    };
+  }, [localStream]);
 
   if (!hasPrerequisites) {
     return null;
@@ -199,13 +238,13 @@ function RoomPage() {
             <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-800">
               <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Microphone</p>
               <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">
-                {roomEntryPreferences?.audioEnabled === false ? "Off" : "On"}
+                {audioEnabled ? "On" : "Off"}
               </p>
             </div>
             <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-800">
               <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Camera</p>
               <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">
-                {roomEntryPreferences?.videoEnabled === false ? "Off" : "On"}
+                {videoEnabled ? "On" : "Off"}
               </p>
             </div>
             <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-800">
@@ -246,6 +285,48 @@ function RoomPage() {
               </button>
             </div>
           ) : null}
+        </section>
+
+        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="space-y-4">
+            <div>
+              <h3 className="text-sm font-semibold tracking-tight text-slate-900 dark:text-slate-100">Your media preview</h3>
+              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                Local camera and microphone readiness based on your room entry preferences.
+              </p>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-800">
+              {localStream ? (
+                <div className="space-y-2">
+                  <video
+                    ref={localPreviewVideoRef}
+                    autoPlay
+                    muted
+                    playsInline
+                    className="aspect-video w-full rounded-lg bg-black object-cover"
+                  />
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {mediaReady ? "Local media is ready." : "Preparing local preview."}
+                  </p>
+                </div>
+              ) : mediaDisabled || preferencesMediaDisabled ? (
+                <p className="text-sm text-slate-700 dark:text-slate-200">Media is disabled in your join preferences.</p>
+              ) : mediaLoading ? (
+                <p className="text-sm text-slate-700 dark:text-slate-200">Starting your camera and microphone preview...</p>
+              ) : mediaError ? (
+                <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-300">
+                  {mediaError}
+                </p>
+              ) : shouldStartLocalMedia ? (
+                <p className="text-sm text-slate-700 dark:text-slate-200">Preparing local media preview...</p>
+              ) : (
+                <p className="text-sm text-slate-700 dark:text-slate-200">
+                  Local media preview will start once you are active in this room.
+                </p>
+              )}
+            </div>
+          </div>
         </section>
 
         {isHost ? (
