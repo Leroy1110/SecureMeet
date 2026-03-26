@@ -1,7 +1,7 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { parsePositiveInteger } from "../lib/roomMessageParsers";
-import { type SessionStatus, useRoomSocket } from "../hooks/useRoomSocket";
+import { type RoomPresenceUser, type SessionStatus, useRoomSocket } from "../hooks/useRoomSocket";
+import { getRoomEntryPreferences } from "../lib/roomEntryPreferences";
 
 type StatusTone = "neutral" | "success" | "warning" | "danger";
 
@@ -90,6 +90,18 @@ const getToneClasses = (tone: StatusTone): { card: string; badge: string } => {
   };
 };
 
+const getPresenceUserLabel = (user: RoomPresenceUser): string => {
+  if (user.label.trim()) {
+    return user.label;
+  }
+
+  if (user.userId !== null) {
+    return `User ${user.userId}`;
+  }
+
+  return "Unknown user";
+};
+
 function RoomPage() {
   const navigate = useNavigate();
   const { roomCode } = useParams<{ roomCode: string }>();
@@ -130,6 +142,10 @@ function RoomPage() {
 
   const stateContent = getSessionStateContent(sessionStatus, displayedError);
   const toneClasses = getToneClasses(stateContent.tone);
+  const roomEntryPreferences = useMemo(
+    () => getRoomEntryPreferences(normalizedRoomCode),
+    [normalizedRoomCode]
+  );
 
   useEffect(() => {
     if (!hasPrerequisites) {
@@ -163,16 +179,34 @@ function RoomPage() {
         </header>
 
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-800">
               <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Room code</p>
               <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">{normalizedRoomCode}</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-800">
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Display name</p>
+              <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">
+                {roomEntryPreferences?.displayName || "Not set"}
+              </p>
             </div>
             <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-800">
               <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Connection</p>
               <span className="mt-2 inline-flex rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-700 dark:text-slate-200">
                 {formatStatusLabel(transportStatus)}
               </span>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-800">
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Microphone</p>
+              <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">
+                {roomEntryPreferences?.audioEnabled === false ? "Off" : "On"}
+              </p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-800">
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Camera</p>
+              <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">
+                {roomEntryPreferences?.videoEnabled === false ? "Off" : "On"}
+              </p>
             </div>
             <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-800">
               <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Role</p>
@@ -234,29 +268,32 @@ function RoomPage() {
                 <p className="text-sm text-slate-600 dark:text-slate-300">No users are waiting right now.</p>
               ) : (
                 <ul className="space-y-2">
-                  {waitingUsers.map((userLabel) => {
-                    const approveKey = `waiting.approve:${userLabel}`;
-                    const rejectKey = `waiting.reject:${userLabel}`;
+                  {waitingUsers.map((user) => {
+                    const userLabel = getPresenceUserLabel(user);
+                    const userKey = user.userId !== null ? String(user.userId) : user.label;
+                    const approveKey = user.userId ? `waiting.approve:${user.userId}` : "";
+                    const rejectKey = user.userId ? `waiting.reject:${user.userId}` : "";
+                    const canModerate = user.userId !== null;
 
                     return (
                       <li
-                        key={userLabel}
+                        key={userKey}
                         className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between dark:border-slate-800 dark:bg-slate-800"
                       >
                         <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{userLabel}</p>
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => sendHostWaitingAction("waiting.approve", userLabel)}
-                            disabled={hostActionPendingKey === approveKey}
+                            onClick={() => sendHostWaitingAction("waiting.approve", user.userId)}
+                            disabled={!canModerate || hostActionPendingKey === approveKey}
                             className="inline-flex h-9 items-center justify-center rounded-lg border border-emerald-300 bg-emerald-50 px-3 text-xs font-medium text-emerald-700 transition duration-200 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-900/40 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-950/60"
                           >
                             Approve
                           </button>
                           <button
                             type="button"
-                            onClick={() => sendHostWaitingAction("waiting.reject", userLabel)}
-                            disabled={hostActionPendingKey === rejectKey}
+                            onClick={() => sendHostWaitingAction("waiting.reject", user.userId)}
+                            disabled={!canModerate || hostActionPendingKey === rejectKey}
                             className="inline-flex h-9 items-center justify-center rounded-lg border border-red-300 bg-red-50 px-3 text-xs font-medium text-red-700 transition duration-200 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/60"
                           >
                             Reject
@@ -278,22 +315,23 @@ function RoomPage() {
                   <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">No active users yet.</p>
                 ) : (
                   <ul className="mt-3 space-y-2">
-                    {activeUsers.map((userLabel) => {
-                      const userId = parsePositiveInteger(userLabel);
+                    {activeUsers.map((user) => {
+                      const userId = user.userId;
+                      const userLabel = getPresenceUserLabel(user);
                       const kickKey = userId ? `member.kick:${userId}` : "";
                       const isLocalHost = localUserId !== null && userId === localUserId;
                       const canKick = Boolean(userId) && !isLocalHost;
 
                       return (
                         <li
-                          key={userLabel}
+                          key={userId !== null ? String(userId) : userLabel}
                           className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between dark:border-slate-800 dark:bg-slate-800"
                         >
                           <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{userLabel}</p>
                           {canKick ? (
                             <button
                               type="button"
-                              onClick={() => sendHostKickAction(userLabel)}
+                              onClick={() => sendHostKickAction(userId)}
                               disabled={hostActionPendingKey === kickKey}
                               className="inline-flex h-9 items-center justify-center rounded-lg border border-red-300 bg-red-50 px-3 text-xs font-medium text-red-700 transition duration-200 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/60"
                             >
@@ -342,8 +380,10 @@ function RoomPage() {
                       className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900"
                     >
                       <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                        User {message.from_user_id ?? "Unknown"}
-                        {message.to_user_id ? ` • Private to User ${message.to_user_id}` : " • Public"}
+                        {message.from_display_name || (message.from_user_id ? `User ${message.from_user_id}` : "Unknown")}
+                        {message.to_user_id
+                          ? ` • Private to ${message.to_display_name || `User ${message.to_user_id}`}`
+                          : " • Public"}
                         {message.created_at ? ` • ${message.created_at}` : ""}
                       </p>
                       <p className="mt-1 whitespace-pre-wrap wrap-break-word text-sm text-slate-800 dark:text-slate-100">
@@ -398,14 +438,18 @@ function RoomPage() {
                   {isHost ? `Waiting users (${waitingUsers.length})` : "Waiting users (Host-only visibility)"}
                 </p>
                 <p className="mt-1 text-sm text-slate-700 dark:text-slate-200">
-                  {isHost ? waitingUsers.join(", ") || "None" : "Unavailable for participants"}
+                  {isHost
+                    ? waitingUsers.map((user) => getPresenceUserLabel(user)).join(", ") || "None"
+                    : "Unavailable for participants"}
                 </p>
               </div>
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-800">
                 <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
                   Active users ({activeUsers.length})
                 </p>
-                <p className="mt-1 text-sm text-slate-700 dark:text-slate-200">{activeUsers.join(", ") || "None"}</p>
+                <p className="mt-1 text-sm text-slate-700 dark:text-slate-200">
+                  {activeUsers.map((user) => getPresenceUserLabel(user)).join(", ") || "None"}
+                </p>
               </div>
             </div>
 

@@ -30,6 +30,7 @@ class RoomMember(Base):
     id = Column(Integer, primary_key=True, index=True)
     room_id = Column(Integer, ForeignKey("rooms.id"), nullable=False, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    display_name = Column(String(64), nullable=False, default="")
     role = Column(String, nullable=False)
     state = Column(String, nullable=False)
     joined_at = Column(DateTime, nullable=True)

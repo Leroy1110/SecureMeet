@@ -15,12 +15,73 @@ router = APIRouter()
 
 room_manager: RoomManager = RoomManager()
 
+
 def build_active_user_ids(room_state: RoomState) -> list[int]:
     users = list(room_state.active_ws.keys())
     host_user_id = room_state.host_user_id
     if host_user_id is not None and host_user_id not in users:
         users.append(host_user_id)
     return users
+
+
+def _resolve_display_names(db: Session, room_id: int, user_ids: list[int]) -> dict[int, str]:
+    normalized_user_ids = list(dict.fromkeys(user_ids))
+    if not normalized_user_ids:
+        return {}
+
+    room_members = (
+        db.query(RoomMember.user_id, RoomMember.display_name)
+        .filter(RoomMember.room_id == room_id, RoomMember.user_id.in_(normalized_user_ids))
+        .all()
+    )
+
+    display_names: dict[int, str] = {}
+    for user_id, display_name in room_members:
+        if isinstance(display_name, str) and display_name.strip():
+            display_names[user_id] = display_name.strip()
+
+    for user_id in normalized_user_ids:
+        display_names.setdefault(user_id, f"User {user_id}")
+
+    return display_names
+
+
+def _serialize_user(db: Session, room_id: int, user_id: int) -> dict:
+    display_names = _resolve_display_names(db, room_id, [user_id])
+    display_name = display_names.get(user_id, f"User {user_id}")
+
+    return {
+        "user_id": user_id,
+        "display_name": display_name,
+        "username": display_name,
+    }
+
+
+def _serialize_users(db: Session, room_id: int, user_ids: list[int]) -> list[dict]:
+    normalized_user_ids = sorted(dict.fromkeys(user_ids))
+    display_names = _resolve_display_names(db, room_id, normalized_user_ids)
+
+    serialized_users: list[dict] = []
+    for user_id in normalized_user_ids:
+        display_name = display_names.get(user_id, f"User {user_id}")
+        serialized_users.append(
+            {
+                "user_id": user_id,
+                "display_name": display_name,
+                "username": display_name,
+            }
+        )
+
+    return serialized_users
+
+
+def build_waiting_users_payload(db: Session, room_id: int, room_state: RoomState) -> list[dict]:
+    return _serialize_users(db, room_id, list(room_state.waiting_ws.keys()))
+
+
+def build_active_users_payload(db: Session, room_id: int, room_state: RoomState) -> list[dict]:
+    return _serialize_users(db, room_id, build_active_user_ids(room_state))
+
 
 def validate_room_for_ws_connect(db: Session, *, room_code_path: str, token_payload: dict) -> tuple[int, int, str, str]:
     payload_room_code: str = token_payload.get("room_code")
@@ -200,7 +261,7 @@ async def handler_approve(
             "type": "active.list",
             "payload": {
                 "room_code": room_code,
-                "users": build_active_user_ids(room_state)
+                "users": build_active_users_payload(db, room_id, room_state)
             }
         })
 
@@ -214,7 +275,7 @@ async def handler_approve(
         message_active_add = {
             "type": "active.add",
             "payload": {
-                "user_id": payload_user_id
+                "user": _serialize_user(db, room_id, payload_user_id)
             }
         }
 
@@ -412,12 +473,20 @@ async def handler_chat_send(
         })
         return
 
+    display_name_map = _resolve_display_names(
+        db,
+        room_id,
+        [user_id for user_id in [sender_user_id, to_user_id] if isinstance(user_id, int)],
+    )
+
     message = {
         "type": "chat.message",
         "payload": {
             "room_code": room_code,
             "from_user_id": sender_user_id,
+            "from_display_name": display_name_map.get(sender_user_id, f"User {sender_user_id}"),
             "to_user_id": to_user_id,
+            "to_display_name": display_name_map.get(to_user_id, f"User {to_user_id}") if to_user_id else None,
             "content": content,
             "created_at": datetime.utcnow().isoformat()
         }
@@ -801,7 +870,7 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, db: Session =
                 message_host_add = {
                     "type": "active.add",
                     "payload": {
-                        "user_id": host_user_id
+                        "user": _serialize_user(db, room_id, host_user_id)
                     }
                 }
                 for ws_active in room_state.active_ws.values():
@@ -815,25 +884,24 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, db: Session =
                 "payload": {
                     "room_code": room_code,
                     "role": role,
-                    "state": "active"
+                    "state": "active",
+                    "user": _serialize_user(db, room_id, user_id),
                 }
             })
 
-            waiting_list = room_state.waiting_ws
             await websocket.send_json({
                 "type": "waiting.list",
                 "payload": {
                     "room_code": room_code,
-                    "users": list(waiting_list.keys())
+                    "users": build_waiting_users_payload(db, room_id, room_state)
                 }
             })
 
-            active_list = room_state.active_ws
             await websocket.send_json({
                 "type": "active.list",
                 "payload": {
                     "room_code": room_code,
-                    "users": build_active_user_ids(room_state)
+                    "users": build_active_users_payload(db, room_id, room_state)
                 }
             })
         elif state == "waiting":
@@ -842,7 +910,8 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, db: Session =
                 "payload": {
                     "room_code": room_code,
                     "role": role,
-                    "state": "waiting"
+                    "state": "waiting",
+                    "user": _serialize_user(db, room_id, user_id),
                 }
             })
 
@@ -861,7 +930,7 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, db: Session =
                     await room_state.host_ws.send_json({
                         "type": "waiting.add",
                         "payload": {
-                            "user_id": user_id
+                            "user": _serialize_user(db, room_id, user_id)
                         }
                     })
                 except WebSocketDisconnect:
@@ -872,14 +941,15 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, db: Session =
                 "payload": {
                     "room_code": room_code,
                     "role": role,
-                    "state": "active"
+                    "state": "active",
+                    "user": _serialize_user(db, room_id, user_id),
                 }
             })
             await websocket.send_json({
                 "type": "active.list",
                 "payload": {
                     "room_code": room_code,
-                    "users": build_active_user_ids(room_state)
+                    "users": build_active_users_payload(db, room_id, room_state)
                 }
             })
         else:

@@ -1,8 +1,6 @@
 import { type Dispatch, type FormEvent, type SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type JsonRecord,
-  extractUserLabel,
-  extractUserList,
   isJsonRecord,
   parseNullableInteger,
   parsePositiveInteger,
@@ -17,10 +15,17 @@ export type SessionStatus = "unknown" | "waiting" | "active" | "rejected" | "kic
 export type HostMemberActionType = "waiting.approve" | "waiting.reject" | "member.kick";
 export type OutgoingMessageType = HostMemberActionType | "chat.send";
 
+export type RoomPresenceUser = {
+  userId: number | null;
+  label: string;
+};
+
 export type ChatMessage = {
   room_code: string;
   from_user_id: number | null;
+  from_display_name: string;
   to_user_id: number | null;
+  to_display_name: string;
   content: string;
   created_at: string;
 };
@@ -39,8 +44,8 @@ export type UseRoomSocketResult = {
   sessionStatus: SessionStatus;
   role: string;
   roomState: string;
-  waitingUsers: string[];
-  activeUsers: string[];
+  waitingUsers: RoomPresenceUser[];
+  activeUsers: RoomPresenceUser[];
   lastMessageType: string;
   lastError: string;
   hostActionError: string;
@@ -63,28 +68,135 @@ export type UseRoomSocketResult = {
   setChatInput: Dispatch<SetStateAction<string>>;
   setSelectedRecipientUserId: Dispatch<SetStateAction<number | null>>;
   setSelectedRecipientFromValue: (value: string) => void;
-  sendHostWaitingAction: (messageType: "waiting.approve" | "waiting.reject", userLabel: string) => void;
-  sendHostKickAction: (userLabel: string) => void;
+  sendHostWaitingAction: (messageType: "waiting.approve" | "waiting.reject", userId: number | null) => void;
+  sendHostKickAction: (userId: number | null) => void;
   sendChatMessage: (event: FormEvent<HTMLFormElement>) => void;
   leaveRoom: () => void;
 };
 
 const FINAL_SESSION_STATUSES: SessionStatus[] = ["rejected", "kicked", "disconnected", "error"];
 
-const addUser = (previousUsers: string[], user: string): string[] => {
+const buildUserLabel = (userId: number | null, label: string): string => {
+  const trimmedLabel = label.trim();
+  if (trimmedLabel) {
+    return trimmedLabel;
+  }
+
+  if (userId !== null) {
+    return `User ${userId}`;
+  }
+
+  return "";
+};
+
+const getRoomPresenceUserKey = (user: RoomPresenceUser): string =>
+  user.userId !== null ? `id:${user.userId}` : `label:${user.label.toLowerCase()}`;
+
+const extractPresenceUser = (value: unknown): RoomPresenceUser | null => {
+  if (typeof value === "number") {
+    const userId = parsePositiveInteger(value);
+    if (!userId) {
+      return null;
+    }
+
+    return {
+      userId,
+      label: buildUserLabel(userId, ""),
+    };
+  }
+
+  if (typeof value === "string") {
+    const trimmedValue = value.trim();
+    if (!trimmedValue) {
+      return null;
+    }
+
+    const userId = parsePositiveInteger(trimmedValue);
+    return {
+      userId: userId ?? null,
+      label: buildUserLabel(userId ?? null, trimmedValue),
+    };
+  }
+
+  if (!isJsonRecord(value)) {
+    return null;
+  }
+
+  const userId =
+    parsePositiveInteger(value.user_id) ??
+    parsePositiveInteger(value.userId) ??
+    parsePositiveInteger(value.id);
+
+  const label = pickString(value, [
+    "display_name",
+    "displayName",
+    "nickname",
+    "username",
+    "name",
+    "label",
+  ]);
+
+  const resolvedLabel = buildUserLabel(userId, label);
+  if (!resolvedLabel) {
+    return null;
+  }
+
+  return {
+    userId: userId ?? null,
+    label: resolvedLabel,
+  };
+};
+
+const extractPresenceUsers = (value: unknown): RoomPresenceUser[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const usersByKey = new Map<string, RoomPresenceUser>();
+  for (const item of value) {
+    const user = extractPresenceUser(item);
+    if (!user) {
+      continue;
+    }
+
+    const key = getRoomPresenceUserKey(user);
+    if (!usersByKey.has(key)) {
+      usersByKey.set(key, user);
+    }
+  }
+
+  return Array.from(usersByKey.values());
+};
+
+const addUser = (previousUsers: RoomPresenceUser[], user: RoomPresenceUser | null): RoomPresenceUser[] => {
   if (!user) {
     return previousUsers;
   }
 
-  if (previousUsers.includes(user)) {
+  const key = getRoomPresenceUserKey(user);
+  if (previousUsers.some((existingUser) => getRoomPresenceUserKey(existingUser) === key)) {
     return previousUsers;
   }
 
   return [...previousUsers, user];
 };
 
-const removeUser = (previousUsers: string[], user: string): string[] =>
-  previousUsers.filter((existingUser) => existingUser !== user);
+const removeUser = (
+  previousUsers: RoomPresenceUser[],
+  userToRemove: RoomPresenceUser | null
+): RoomPresenceUser[] => {
+  if (!userToRemove) {
+    return previousUsers;
+  }
+
+  if (userToRemove.userId !== null) {
+    return previousUsers.filter((existingUser) => existingUser.userId !== userToRemove.userId);
+  }
+
+  return previousUsers.filter(
+    (existingUser) => existingUser.label.toLowerCase() !== userToRemove.label.toLowerCase()
+  );
+};
 
 export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketResult => {
   const [roomToken, setRoomToken] = useState(() => getRoomSessionToken());
@@ -95,8 +207,8 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
   const [sessionStatus, setSessionStatus] = useState<SessionStatus>("unknown");
   const [role, setRole] = useState("");
   const [roomState, setRoomState] = useState("");
-  const [waitingUsers, setWaitingUsers] = useState<string[]>([]);
-  const [activeUsers, setActiveUsers] = useState<string[]>([]);
+  const [waitingUsers, setWaitingUsers] = useState<RoomPresenceUser[]>([]);
+  const [activeUsers, setActiveUsers] = useState<RoomPresenceUser[]>([]);
   const [lastMessageType, setLastMessageType] = useState("");
   const [lastError, setLastError] = useState("");
   const [hostActionError, setHostActionError] = useState("");
@@ -184,7 +296,7 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
     return errors;
   }, [normalizedRoomCode, roomToken]);
 
-  const sendHostMemberAction = (messageType: HostMemberActionType, userLabel: string) => {
+  const sendHostMemberAction = (messageType: HostMemberActionType, userId: number | null) => {
     if (role !== "host") {
       setHostActionError("Only the host can manage room members.");
       return;
@@ -196,7 +308,6 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
       return;
     }
 
-    const userId = parsePositiveInteger(userLabel);
     if (!userId) {
       if (messageType === "member.kick") {
         setHostActionError("Cannot kick: invalid user id.");
@@ -237,12 +348,12 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
     }
   };
 
-  const sendHostWaitingAction = (messageType: "waiting.approve" | "waiting.reject", userLabel: string) => {
-    sendHostMemberAction(messageType, userLabel);
+  const sendHostWaitingAction = (messageType: "waiting.approve" | "waiting.reject", userId: number | null) => {
+    sendHostMemberAction(messageType, userId);
   };
 
-  const sendHostKickAction = (userLabel: string) => {
-    sendHostMemberAction("member.kick", userLabel);
+  const sendHostKickAction = (userId: number | null) => {
+    sendHostMemberAction("member.kick", userId);
   };
 
   const canSendChat = sessionStatus === "active" || role === "host";
@@ -250,8 +361,8 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
   const chatRecipientOptions = useMemo<ChatRecipientOption[]>(() => {
     const optionsByUserId = new Map<number, ChatRecipientOption>();
 
-    for (const userLabel of activeUsers) {
-      const userId = parsePositiveInteger(userLabel);
+    for (const user of activeUsers) {
+      const userId = user.userId;
       if (!userId) {
         continue;
       }
@@ -263,7 +374,7 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
       if (!optionsByUserId.has(userId)) {
         optionsByUserId.set(userId, {
           userId,
-          label: `User ${userId}`,
+          label: user.label,
         });
       }
     }
@@ -427,9 +538,9 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
         applyCommonState(payloadValue);
       }
 
-      const resolveList = (record: JsonRecord, keys: string[]): string[] => {
+      const resolveList = (record: JsonRecord, keys: string[]): RoomPresenceUser[] => {
         for (const key of keys) {
-          const users = extractUserList(record[key]);
+          const users = extractPresenceUsers(record[key]);
           if (users.length > 0 || Array.isArray(record[key])) {
             return users;
           }
@@ -438,18 +549,18 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
         return [];
       };
 
-      const resolveSingleUser = (record: JsonRecord): string => {
-        const direct = extractUserLabel(record.user);
+      const resolveSingleUser = (record: JsonRecord): RoomPresenceUser | null => {
+        const direct = extractPresenceUser(record.user);
         if (direct) {
           return direct;
         }
 
-        const nested = extractUserLabel(record.user_id) || extractUserLabel(record.username);
+        const nested = extractPresenceUser(record.member);
         if (nested) {
           return nested;
         }
 
-        return extractUserLabel(record);
+        return extractPresenceUser(record);
       };
 
       switch (messageType) {
@@ -457,7 +568,9 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
           setConnectionStatus("connected");
           lastOutgoingMessageTypeRef.current = null;
           if (isJsonRecord(payloadValue)) {
+            const connectedUser = extractPresenceUser(payloadValue.user);
             const connectedUserId =
+              connectedUser?.userId ??
               parsePositiveInteger(payloadValue.user_id) ??
               parsePositiveInteger(payloadValue.userId) ??
               parsePositiveInteger(payloadValue.id);
@@ -568,7 +681,19 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
           const chatMessage: ChatMessage = {
             room_code: readString(payloadValue.room_code),
             from_user_id: parseNullableInteger(payloadValue.from_user_id),
+            from_display_name: pickString(payloadValue, [
+              "from_display_name",
+              "fromDisplayName",
+              "from_username",
+              "fromUsername",
+            ]),
             to_user_id: parseNullableInteger(payloadValue.to_user_id),
+            to_display_name: pickString(payloadValue, [
+              "to_display_name",
+              "toDisplayName",
+              "to_username",
+              "toUsername",
+            ]),
             content,
             created_at: readString(payloadValue.created_at),
           };

@@ -33,8 +33,18 @@ export type RoomCreateResponse = {
 export type RoomJoinRequest = {
     room_code: string
     room_password: string
+    display_name?: string
 }
 
 export type RoomJoinResponse = {
     room_jwt: string
+}
+
+export type RoomDisplayNameUpdateRequest = {
+    room_code: string
+    display_name: string
+}
+
+export type RoomDisplayNameUpdateResponse = {
+    display_name: string
 }
