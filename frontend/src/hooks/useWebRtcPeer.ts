@@ -5,7 +5,10 @@ export type UseWebRtcPeerResult = {
   remoteStream: MediaStream | null;
   rtcError: string;
   rtcConnectionState: RTCPeerConnectionState | "new";
-  createPeerConnection: (localStream: MediaStream | null) => RTCPeerConnection | null;
+  createPeerConnection: (
+    localStream: MediaStream | null,
+    onIceCandidate?: ((event: RTCPeerConnectionIceEvent) => void) | null
+  ) => RTCPeerConnection | null;
   closePeerConnection: () => void;
 };
 
@@ -57,6 +60,8 @@ export const useWebRtcPeer = (): UseWebRtcPeerResult => {
   const isPeerConnectionReusable = (connection: RTCPeerConnection): boolean =>
     connection.connectionState !== "closed" &&
     connection.connectionState !== "failed" &&
+    connection.connectionState !== "disconnected" &&
+    connection.iceConnectionState !== "disconnected" &&
     connection.iceConnectionState !== "failed";
 
   const closePeerConnection = useCallback(() => {
@@ -85,10 +90,14 @@ export const useWebRtcPeer = (): UseWebRtcPeerResult => {
   }, []);
 
   const createPeerConnection = useCallback(
-    (localStream: MediaStream | null): RTCPeerConnection | null => {
+    (
+      localStream: MediaStream | null,
+      onIceCandidate?: ((event: RTCPeerConnectionIceEvent) => void) | null
+    ): RTCPeerConnection | null => {
       const existingPeerConnection = peerConnectionRef.current;
       if (existingPeerConnection && isPeerConnectionReusable(existingPeerConnection)) {
         try {
+          existingPeerConnection.onicecandidate = onIceCandidate ?? null;
           addLocalTracks(existingPeerConnection, localStream);
         } catch (error) {
           setRtcError(toRtcErrorMessage(error, "Failed to attach local media tracks."));
@@ -145,6 +154,7 @@ export const useWebRtcPeer = (): UseWebRtcPeerResult => {
         nextPeerConnection.onicecandidateerror = () => {
           setRtcError("Unable to gather media network candidates.");
         };
+        nextPeerConnection.onicecandidate = onIceCandidate ?? null;
 
         addLocalTracks(nextPeerConnection, localStream);
         return nextPeerConnection;

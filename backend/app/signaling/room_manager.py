@@ -50,6 +50,30 @@ class RoomManager:
             else:
                 raise ValueError(f"Invalid state: {state}")
 
+    def get_registered_connection_state(
+            self,
+            room_code: str,
+            ws: WebSocket,
+            user_id: int,
+            role: str) -> str | None:
+        if room_code not in self.rooms:
+            return None
+
+        room_state: RoomState = self.rooms[room_code]
+
+        if role == "host":
+            if ws is room_state.host_ws and user_id == room_state.host_user_id:
+                return "active"
+            return None
+
+        if room_state.waiting_ws.get(user_id) is ws:
+            return "waiting"
+
+        if room_state.active_ws.get(user_id) is ws:
+            return "active"
+
+        return None
+
     def remove_connection(self, room_code: str, ws: WebSocket, user_id: int):
         if room_code not in self.rooms:
             return
@@ -58,12 +82,15 @@ class RoomManager:
         room_active: dict[int, WebSocket] = room_state.active_ws
         room_waiting: dict[int, WebSocket] = room_state.waiting_ws
 
-        if ws is room_state.host_ws or user_id == room_state.host_user_id:
+        if ws is room_state.host_ws and user_id == room_state.host_user_id:
             room_state.host_ws = None
             room_state.host_user_id = None
 
-        room_active.pop(user_id, None)
-        room_waiting.pop(user_id, None)
+        if room_active.get(user_id) is ws:
+            room_active.pop(user_id, None)
+
+        if room_waiting.get(user_id) is ws:
+            room_waiting.pop(user_id, None)
 
         if room_state.host_ws is None and not room_active and not room_waiting:
             del self.rooms[room_code]

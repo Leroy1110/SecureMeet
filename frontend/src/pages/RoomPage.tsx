@@ -180,13 +180,30 @@ function RoomPage() {
     stopLocalMedia,
   } = useLocalMedia();
   const {
-    peerConnection,
     remoteStream,
     rtcError,
     rtcConnectionState,
     createPeerConnection,
     closePeerConnection,
   } = useWebRtcPeer();
+
+  const buildIceCandidateHandler = (targetUserId: number | null) => {
+    if (targetUserId === null) {
+      return null;
+    }
+
+    return (event: RTCPeerConnectionIceEvent) => {
+      if (!event.candidate) {
+        return;
+      }
+
+      const candidate = event.candidate.toJSON();
+      const didSendCandidate = sendWebRtcIceCandidate(targetUserId, candidate);
+      if (!didSendCandidate) {
+        setRtcFlowError("Unable to send WebRTC ICE candidate.");
+      }
+    };
+  };
 
   const hasLocalVideoTrack = Boolean(localStream?.getVideoTracks().length);
   const hasLocalAudioTrack = Boolean(localStream?.getAudioTracks().length);
@@ -331,7 +348,10 @@ function RoomPage() {
       closePeerConnection();
     }
 
-    const currentPeerConnection = createPeerConnection(localStream);
+    const currentPeerConnection = createPeerConnection(
+      localStream,
+      buildIceCandidateHandler(resolvedTargetUserId)
+    );
     if (!currentPeerConnection) {
       setRtcFlowError("Unable to initialize WebRTC connection.");
       return;
@@ -388,7 +408,6 @@ function RoomPage() {
     isSocketOpen,
     localStream,
     localUserId,
-    peerConnection,
     rtcTargetUserId,
     sendWebRtcOffer,
   ]);
@@ -412,7 +431,10 @@ function RoomPage() {
       return;
     }
 
-    const currentPeerConnection = createPeerConnection(localStream);
+    const currentPeerConnection = createPeerConnection(
+      localStream,
+      buildIceCandidateHandler(resolvedTargetUserId)
+    );
     if (!currentPeerConnection) {
       setRtcFlowError("Unable to process WebRTC signaling because peer connection initialization failed.");
       return;
@@ -510,29 +532,8 @@ function RoomPage() {
     localStream,
     localUserId,
     sendWebRtcAnswer,
+    sendWebRtcIceCandidate,
   ]);
-
-  useEffect(() => {
-    if (!peerConnection || !canSendWebRtc || !isSocketOpen || rtcTargetUserId === null) {
-      return;
-    }
-
-    peerConnection.onicecandidate = (event) => {
-      if (!event.candidate) {
-        return;
-      }
-
-      const candidate = event.candidate.toJSON();
-      const didSendCandidate = sendWebRtcIceCandidate(rtcTargetUserId, candidate);
-      if (!didSendCandidate) {
-        setRtcFlowError("Unable to send WebRTC ICE candidate.");
-      }
-    };
-
-    return () => {
-      peerConnection.onicecandidate = null;
-    };
-  }, [canSendWebRtc, isSocketOpen, peerConnection, rtcTargetUserId, sendWebRtcIceCandidate]);
 
   if (!hasPrerequisites) {
     return null;

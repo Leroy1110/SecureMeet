@@ -1411,8 +1411,17 @@ async def websocket_endpoint(
         except WebSocketDisconnect:
             pass
         finally:
-            was_waiting = (user_id in room_state.waiting_ws)
-            was_active = (user_id in room_state.active_ws)
+            registered_connection_state = room_manager.get_registered_connection_state(
+                room_code=room_code,
+                ws=websocket,
+                user_id=user_id,
+                role=role,
+            )
+            was_waiting = registered_connection_state == "waiting"
+            was_active = registered_connection_state == "active"
+
+            if registered_connection_state is None:
+                return
 
             try:
                 mark_member_left(db=db, room_id=room_id, user_id=user_id)
@@ -1463,11 +1472,7 @@ async def websocket_endpoint(
                         await room_state.host_ws.send_json(message_active_remove)
                     except Exception:
                         pass
-            elif (
-                role == "host"
-                and room_state.host_ws is websocket
-                and room_state.host_user_id is not None
-            ):
+            elif role == "host" and room_state.host_user_id is not None:
                 message_active_remove_host = {
                     "type": "active.remove",
                     "payload": {
