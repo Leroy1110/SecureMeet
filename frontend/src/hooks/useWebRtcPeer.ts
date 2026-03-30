@@ -60,8 +60,6 @@ export const useWebRtcPeer = (): UseWebRtcPeerResult => {
   const isPeerConnectionReusable = (connection: RTCPeerConnection): boolean =>
     connection.connectionState !== "closed" &&
     connection.connectionState !== "failed" &&
-    connection.connectionState !== "disconnected" &&
-    connection.iceConnectionState !== "disconnected" &&
     connection.iceConnectionState !== "failed";
 
   const closePeerConnection = useCallback(() => {
@@ -142,13 +140,25 @@ export const useWebRtcPeer = (): UseWebRtcPeerResult => {
           setRtcConnectionState(nextPeerConnection.connectionState || "new");
           if (nextPeerConnection.connectionState === "failed") {
             setRtcError("WebRTC connection failed. Please try leaving and rejoining the room.");
+            return;
+          }
+
+          if (nextPeerConnection.connectionState === "closed") {
+            setRemoteStream(null);
+            return;
+          }
+
+          if (nextPeerConnection.connectionState === "disconnected") {
+            setRtcError("Remote media connection was interrupted.");
           }
         };
 
         nextPeerConnection.oniceconnectionstatechange = () => {
           if (nextPeerConnection.iceConnectionState === "failed") {
             setRtcError("Media network connectivity failed.");
+            return;
           }
+
         };
 
         nextPeerConnection.onicecandidateerror = () => {
