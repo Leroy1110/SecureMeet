@@ -14,7 +14,7 @@ export type ConnectionStatus = "connecting" | "open" | "connected" | "closed" | 
 export type SessionStatus = "unknown" | "waiting" | "active" | "rejected" | "kicked" | "disconnected" | "error";
 export type HostMemberActionType = "waiting.approve" | "waiting.reject" | "member.kick";
 export type WebRtcMessageType = "webrtc.offer" | "webrtc.answer" | "webrtc.ice_candidate";
-export type OutgoingMessageType = HostMemberActionType | "chat.send" | WebRtcMessageType;
+export type OutgoingMessageType = HostMemberActionType | "chat.send" | WebRtcMessageType | "room.leave";
 
 export type RoomPresenceUser = {
   userId: number | null;
@@ -44,6 +44,10 @@ export type IncomingWebRtcSignal = {
   candidate?: RTCIceCandidateInit;
 };
 
+export type QueuedWebRtcSignal = IncomingWebRtcSignal & {
+  queueId: number;
+};
+
 export type UseRoomSocketParams = {
   roomCode?: string;
 };
@@ -64,7 +68,7 @@ export type UseRoomSocketResult = {
   chatError: string;
   selectedRecipientUserId: number | null;
   chatRecipientOptions: ChatRecipientOption[];
-  lastWebRtcSignal: IncomingWebRtcSignal | null;
+  queuedWebRtcSignals: QueuedWebRtcSignal[];
   localUserId: number | null;
   hasPrerequisites: boolean;
   normalizedRoomCode: string;
@@ -85,10 +89,23 @@ export type UseRoomSocketResult = {
   sendWebRtcOffer: (toUserId: number | null, sdp: string) => boolean;
   sendWebRtcAnswer: (toUserId: number | null, sdp: string) => boolean;
   sendWebRtcIceCandidate: (toUserId: number | null, candidate: RTCIceCandidateInit) => boolean;
+  consumeWebRtcSignal: (queueId: number) => void;
   leaveRoom: () => void;
 };
 
 const FINAL_SESSION_STATUSES: SessionStatus[] = ["rejected", "kicked", "disconnected", "error"];
+const EXPLICIT_LEAVE_CLOSE_DELAY_MS = 150;
+const TERMINAL_CLOSE_REASON_FRAGMENTS = [
+  "room is not active",
+  "room has expired",
+  "room member not found",
+  "member state not allowed",
+  "room not found",
+  "unable to decode token",
+  "invalid state",
+  "invalid role",
+  "missing token",
+];
 
 const buildUserLabel = (userId: number | null, label: string): string => {
   const trimmedLabel = label.trim();
@@ -262,6 +279,15 @@ const normalizeOutgoingRtcCandidate = (candidate: RTCIceCandidateInit): RTCIceCa
   };
 };
 
+const isTerminalSessionCloseReason = (reason: string): boolean => {
+  const normalizedReason = reason.trim().toLowerCase();
+  if (!normalizedReason) {
+    return false;
+  }
+
+  return TERMINAL_CLOSE_REASON_FRAGMENTS.some((fragment) => normalizedReason.includes(fragment));
+};
+
 export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketResult => {
   const [roomToken, setRoomToken] = useState(() => getRoomSessionToken());
   const normalizedRoomCode = roomCode?.trim() ?? "";
@@ -281,10 +307,13 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
   const [chatInput, setChatInput] = useState("");
   const [chatError, setChatError] = useState("");
   const [selectedRecipientUserId, setSelectedRecipientUserId] = useState<number | null>(null);
-  const [lastWebRtcSignal, setLastWebRtcSignal] = useState<IncomingWebRtcSignal | null>(null);
+  const [queuedWebRtcSignals, setQueuedWebRtcSignals] = useState<QueuedWebRtcSignal[]>([]);
   const [localUserId, setLocalUserId] = useState<number | null>(() => readUserIdFromToken(roomToken));
   const socketRef = useRef<WebSocket | null>(null);
   const lastOutgoingMessageTypeRef = useRef<OutgoingMessageType | null>(null);
+  const nextQueuedSignalIdRef = useRef(1);
+  const leaveCloseTimeoutRef = useRef<number | null>(null);
+  const isLeavingRoomRef = useRef(false);
 
   const resetRoomLocalState = useCallback(() => {
     setConnectionStatus("closed");
@@ -301,11 +330,22 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
     setChatInput("");
     setChatError("");
     setSelectedRecipientUserId(null);
-    setLastWebRtcSignal(null);
+    setQueuedWebRtcSignals([]);
     setLocalUserId(null);
+    nextQueuedSignalIdRef.current = 1;
+  }, []);
+
+  const clearLeaveCloseTimeout = useCallback(() => {
+    if (leaveCloseTimeoutRef.current === null) {
+      return;
+    }
+
+    window.clearTimeout(leaveCloseTimeoutRef.current);
+    leaveCloseTimeoutRef.current = null;
   }, []);
 
   const closeSocketConnection = useCallback(() => {
+    clearLeaveCloseTimeout();
     const socket = socketRef.current;
     socketRef.current = null;
 
@@ -325,15 +365,44 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
         console.error("Failed to close room socket during leave/cleanup.", error);
       }
     }
-  }, []);
+  }, [clearLeaveCloseTimeout]);
 
   const leaveRoom = useCallback(() => {
+    const socket = socketRef.current;
+    isLeavingRoomRef.current = true;
     lastOutgoingMessageTypeRef.current = null;
-    closeSocketConnection();
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      try {
+        socket.send(
+          JSON.stringify({
+            type: "room.leave",
+            payload: {},
+          })
+        );
+      } catch {
+        // Local cleanup should continue even if the server-side leave signal cannot be sent.
+      }
+
+      clearLeaveCloseTimeout();
+      leaveCloseTimeoutRef.current = window.setTimeout(() => {
+        closeSocketConnection();
+        isLeavingRoomRef.current = false;
+      }, EXPLICIT_LEAVE_CLOSE_DELAY_MS);
+    } else {
+      closeSocketConnection();
+      isLeavingRoomRef.current = false;
+    }
+
     clearRoomSessionToken();
     setRoomToken("");
     resetRoomLocalState();
-  }, [closeSocketConnection, resetRoomLocalState]);
+  }, [clearLeaveCloseTimeout, closeSocketConnection, resetRoomLocalState]);
+
+  const consumeWebRtcSignal = useCallback((queueId: number) => {
+    setQueuedWebRtcSignals((previousSignals) =>
+      previousSignals.filter((signal) => signal.queueId !== queueId)
+    );
+  }, []);
 
   const clearPersistedRoomSession = useCallback(() => {
     clearRoomSessionToken();
@@ -554,26 +623,24 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
   );
 
   const sendWebRtcOffer = useCallback((toUserId: number | null, sdp: string): boolean => {
-    const normalizedSdp = sdp.trim();
-    if (!toUserId || !normalizedSdp) {
+    if (!toUserId || sdp.length === 0) {
       return false;
     }
 
     return sendWebRtcSignal("webrtc.offer", {
       to_user_id: toUserId,
-      sdp: normalizedSdp,
+      sdp,
     });
   }, [sendWebRtcSignal]);
 
   const sendWebRtcAnswer = useCallback((toUserId: number | null, sdp: string): boolean => {
-    const normalizedSdp = sdp.trim();
-    if (!toUserId || !normalizedSdp) {
+    if (!toUserId || sdp.length === 0) {
       return false;
     }
 
     return sendWebRtcSignal("webrtc.answer", {
       to_user_id: toUserId,
-      sdp: normalizedSdp,
+      sdp,
     });
   }, [sendWebRtcSignal]);
 
@@ -608,6 +675,7 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
     setHostActionError("");
     setHostActionPendingKey("");
     setChatError("");
+    isLeavingRoomRef.current = false;
 
     const socket = new WebSocket(socketConfig.url);
     socketRef.current = socket;
@@ -633,17 +701,36 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
     };
 
     socket.onopen = () => {
+      if (isLeavingRoomRef.current) {
+        return;
+      }
+
       setConnectionStatus("open");
       setLastError("");
     };
 
-    socket.onclose = () => {
+    socket.onclose = (closeEvent) => {
+      if (isLeavingRoomRef.current) {
+        return;
+      }
+
+      const closeReason = closeEvent?.reason?.trim() ?? "";
+      if (isTerminalSessionCloseReason(closeReason)) {
+        clearPersistedRoomSession();
+        setSessionStatus("error");
+        setLastError(closeReason);
+      }
+
       if (!hadSocketError) {
         setConnectionStatus("closed");
       }
     };
 
     socket.onerror = () => {
+      if (isLeavingRoomRef.current) {
+        return;
+      }
+
       hadSocketError = true;
       setConnectionStatus("error");
       setSessionStatus("error");
@@ -651,6 +738,10 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
     };
 
     socket.onmessage = (event) => {
+      if (isLeavingRoomRef.current) {
+        return;
+      }
+
       if (typeof event.data !== "string") {
         setLastError("Received non-text WebSocket message.");
         return;
@@ -724,8 +815,8 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
         const toUserId = parseNullableInteger(record.to_user_id ?? record.toUserId);
 
         if (type === "webrtc.offer" || type === "webrtc.answer") {
-          const sdp = readString(record.sdp).trim();
-          if (!sdp) {
+          const sdp = readString(record.sdp);
+          if (sdp.length === 0) {
             return null;
           }
 
@@ -844,7 +935,6 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
         }
         case "system.disconnected": {
           lastOutgoingMessageTypeRef.current = null;
-          clearPersistedRoomSession();
           const message = isJsonRecord(payloadValue)
             ? pickString(payloadValue, ["message", "detail", "error", "reason"])
             : "";
@@ -906,7 +996,13 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
             break;
           }
 
-          setLastWebRtcSignal(signal);
+          setQueuedWebRtcSignals((previousSignals) => [
+            ...previousSignals,
+            {
+              ...signal,
+              queueId: nextQueuedSignalIdRef.current++,
+            },
+          ]);
           if (lastOutgoingMessageTypeRef.current === messageType) {
             lastOutgoingMessageTypeRef.current = null;
           }
@@ -953,6 +1049,10 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
     };
 
     return () => {
+      if (isLeavingRoomRef.current && leaveCloseTimeoutRef.current !== null) {
+        return;
+      }
+
       closeSocketConnection();
     };
   }, [clearPersistedRoomSession, closeSocketConnection, hasPrerequisites, socketConfig.error, socketConfig.url]);
@@ -978,7 +1078,7 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
     chatError,
     selectedRecipientUserId,
     chatRecipientOptions,
-    lastWebRtcSignal,
+    queuedWebRtcSignals,
     localUserId,
     hasPrerequisites,
     normalizedRoomCode,
@@ -999,6 +1099,7 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
     sendWebRtcOffer,
     sendWebRtcAnswer,
     sendWebRtcIceCandidate,
+    consumeWebRtcSignal,
     leaveRoom,
   };
 };

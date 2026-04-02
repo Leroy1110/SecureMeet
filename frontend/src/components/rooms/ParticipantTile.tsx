@@ -65,12 +65,12 @@ const ParticipantTile = ({
       return;
     }
 
-    audioElement.srcObject = playAudioWhenAudioOnly && !showVideo ? stream : null;
+    audioElement.srcObject = playAudioWhenAudioOnly ? stream : null;
 
     return () => {
       audioElement.srcObject = null;
     };
-  }, [playAudioWhenAudioOnly, showVideo, stream]);
+  }, [playAudioWhenAudioOnly, stream]);
 
   const tileClassName = `relative overflow-hidden rounded-2xl border bg-slate-900 ${
     selected ? "border-blue-400 ring-2 ring-blue-300/50 dark:border-blue-500 dark:ring-blue-900/60" : "border-slate-700"

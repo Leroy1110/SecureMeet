@@ -13,6 +13,7 @@ export type UseWebRtcPeerResult = {
 };
 
 const DEFAULT_ICE_SERVERS: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
+const DISCONNECTED_ERROR_DELAY_MS = 8000;
 
 const toRtcErrorMessage = (error: unknown, fallbackMessage: string): string => {
   if (error instanceof Error && error.message.trim()) {
@@ -56,6 +57,17 @@ export const useWebRtcPeer = (): UseWebRtcPeerResult => {
 
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const fallbackRemoteStreamRef = useRef<MediaStream | null>(null);
+  const disconnectErrorTimeoutRef = useRef<number | null>(null);
+  const hasReceivedRemoteMediaRef = useRef(false);
+
+  const clearDisconnectErrorTimeout = useCallback(() => {
+    if (disconnectErrorTimeoutRef.current === null) {
+      return;
+    }
+
+    window.clearTimeout(disconnectErrorTimeoutRef.current);
+    disconnectErrorTimeoutRef.current = null;
+  }, []);
 
   const isPeerConnectionReusable = (connection: RTCPeerConnection): boolean =>
     connection.connectionState !== "closed" &&
@@ -63,6 +75,7 @@ export const useWebRtcPeer = (): UseWebRtcPeerResult => {
     connection.iceConnectionState !== "failed";
 
   const closePeerConnection = useCallback(() => {
+    clearDisconnectErrorTimeout();
     const currentPeerConnection = peerConnectionRef.current;
     peerConnectionRef.current = null;
 
@@ -81,11 +94,12 @@ export const useWebRtcPeer = (): UseWebRtcPeerResult => {
     }
 
     fallbackRemoteStreamRef.current = null;
+    hasReceivedRemoteMediaRef.current = false;
     setPeerConnection(null);
     setRemoteStream(null);
     setRtcError("");
     setRtcConnectionState("new");
-  }, []);
+  }, [clearDisconnectErrorTimeout]);
 
   const createPeerConnection = useCallback(
     (
@@ -117,8 +131,14 @@ export const useWebRtcPeer = (): UseWebRtcPeerResult => {
         setRemoteStream(null);
         setRtcError("");
         setRtcConnectionState(nextPeerConnection.connectionState || "new");
+        hasReceivedRemoteMediaRef.current = false;
+        clearDisconnectErrorTimeout();
 
         nextPeerConnection.ontrack = (event) => {
+          hasReceivedRemoteMediaRef.current = true;
+          clearDisconnectErrorTimeout();
+          setRtcError("");
+
           const [stream] = event.streams;
           if (stream) {
             fallbackRemoteStreamRef.current = stream;
@@ -139,30 +159,62 @@ export const useWebRtcPeer = (): UseWebRtcPeerResult => {
         nextPeerConnection.onconnectionstatechange = () => {
           setRtcConnectionState(nextPeerConnection.connectionState || "new");
           if (nextPeerConnection.connectionState === "failed") {
+            clearDisconnectErrorTimeout();
             setRtcError("WebRTC connection failed. Please try leaving and rejoining the room.");
             return;
           }
 
           if (nextPeerConnection.connectionState === "closed") {
+            clearDisconnectErrorTimeout();
             setRemoteStream(null);
             return;
           }
 
-          if (nextPeerConnection.connectionState === "disconnected") {
-            setRtcError("Remote media connection was interrupted.");
+          if (nextPeerConnection.connectionState === "connected") {
+            clearDisconnectErrorTimeout();
+            if (hasReceivedRemoteMediaRef.current) {
+              setRtcError("");
+            }
+            return;
           }
+
+          if (nextPeerConnection.connectionState !== "disconnected") {
+            clearDisconnectErrorTimeout();
+            return;
+          }
+
+          clearDisconnectErrorTimeout();
+          disconnectErrorTimeoutRef.current = window.setTimeout(() => {
+            if (peerConnectionRef.current !== nextPeerConnection) {
+              return;
+            }
+
+            if (
+              nextPeerConnection.connectionState === "disconnected" &&
+              !hasReceivedRemoteMediaRef.current
+            ) {
+              setRtcError("Remote media connection could not be established.");
+            }
+          }, DISCONNECTED_ERROR_DELAY_MS);
         };
 
         nextPeerConnection.oniceconnectionstatechange = () => {
           if (nextPeerConnection.iceConnectionState === "failed") {
+            clearDisconnectErrorTimeout();
             setRtcError("Media network connectivity failed.");
             return;
           }
-
         };
 
-        nextPeerConnection.onicecandidateerror = () => {
-          setRtcError("Unable to gather media network candidates.");
+        nextPeerConnection.onicecandidateerror = (event) => {
+          // Candidate gathering can fail for some interfaces while the call still succeeds.
+          // Keep this as debug telemetry and reserve user-facing errors for actual failures.
+          console.warn("WebRTC ICE candidate gathering warning.", {
+            address: event.address,
+            errorCode: event.errorCode,
+            errorText: event.errorText,
+            url: event.url,
+          });
         };
         nextPeerConnection.onicecandidate = onIceCandidate ?? null;
 
@@ -173,7 +225,7 @@ export const useWebRtcPeer = (): UseWebRtcPeerResult => {
         return null;
       }
     },
-    [closePeerConnection]
+    [clearDisconnectErrorTimeout, closePeerConnection]
   );
 
   useEffect(() => {

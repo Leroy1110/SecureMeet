@@ -186,6 +186,60 @@ def _parse_target_user_id(payload: dict) -> int | None:
     return target_user_id
 
 
+async def _notify_waiting_removed(room_state: RoomState, user_id: int):
+    if room_state.host_ws is None:
+        return
+
+    try:
+        await room_state.host_ws.send_json({
+            "type": "waiting.removed",
+            "payload": {
+                "user_id": user_id
+            }
+        })
+    except Exception:
+        pass
+
+
+async def _broadcast_active_removed(room_state: RoomState, user_id: int):
+    message_active_remove = {
+        "type": "active.remove",
+        "payload": {
+            "user_id": user_id
+        }
+    }
+
+    for ws_id, ws_active in room_state.active_ws.items():
+        if ws_id == user_id:
+            continue
+
+        try:
+            await ws_active.send_json(message_active_remove)
+        except Exception:
+            pass
+
+    if room_state.host_ws is not None and room_state.host_user_id != user_id:
+        try:
+            await room_state.host_ws.send_json(message_active_remove)
+        except Exception:
+            pass
+
+
+async def _broadcast_host_removed(room_state: RoomState, host_user_id: int):
+    message_active_remove_host = {
+        "type": "active.remove",
+        "payload": {
+            "user_id": host_user_id
+        }
+    }
+
+    for ws_active in room_state.active_ws.values():
+        try:
+            await ws_active.send_json(message_active_remove_host)
+        except Exception:
+            pass
+
+
 async def _relay_webrtc_payload(
     websocket: WebSocket,
     room_state: RoomState,
@@ -908,24 +962,7 @@ async def handler_kick(
         return
 
     elif result_state_ws == "active":
-        message_active_remove = {
-            "type": "active.remove",
-            "payload": {
-                "user_id": payload_user_id
-            }
-        }
-        for user_id, ws_active in room_state.active_ws.items():
-            if user_id != payload_user_id:
-                try:
-                    await ws_active.send_json(message_active_remove)
-                except Exception:
-                    pass
-
-        if room_state.host_ws is not None:
-            try:
-                await room_state.host_ws.send_json(message_active_remove)
-            except Exception:
-                pass
+        await _broadcast_active_removed(room_state, payload_user_id)
         return
 
 MESSAGE_HANDLERS = {
@@ -1387,6 +1424,56 @@ async def websocket_endpoint(
                     )
                     return
 
+                if message_type == "room.leave":
+                    registered_connection_state = room_manager.get_registered_connection_state(
+                        room_code=room_code,
+                        ws=websocket,
+                        user_id=user_id,
+                        role=role,
+                    )
+                    if registered_connection_state is None:
+                        await websocket.close(
+                            code=status.WS_1000_NORMAL_CLOSURE,
+                            reason="room connection already closed",
+                        )
+                        return
+
+                    try:
+                        mark_member_left(db=db, room_id=room_id, user_id=user_id)
+                    except Exception:
+                        pass
+
+                    room_manager.remove_connection(room_code, websocket, user_id=user_id)
+
+                    try:
+                        log_event(
+                            db=db,
+                            event_type="LEAVE",
+                            room_id=room_id,
+                            user_id=user_id,
+                            data={
+                                "room_code": room_code,
+                                "role": role,
+                                "registered_state": registered_connection_state,
+                                "explicit": True
+                            }
+                        )
+                    except Exception:
+                        pass
+
+                    if role == "host":
+                        await _broadcast_host_removed(room_state, user_id)
+                    elif registered_connection_state == "waiting":
+                        await _notify_waiting_removed(room_state, user_id)
+                    elif registered_connection_state == "active":
+                        await _broadcast_active_removed(room_state, user_id)
+
+                    await websocket.close(
+                        code=status.WS_1000_NORMAL_CLOSURE,
+                        reason="left room",
+                    )
+                    return
+
                 handler = MESSAGE_HANDLERS.get(message_type)
 
                 if handler:
@@ -1424,14 +1511,9 @@ async def websocket_endpoint(
                 return
 
             try:
-                mark_member_left(db=db, room_id=room_id, user_id=user_id)
-            except Exception:
-                pass
-
-            try:
                 log_event(
                     db=db,
-                    event_type="LEAVE",
+                    event_type="WS_DISCONNECT",
                     room_id=room_id,
                     user_id=user_id,
                     data={
@@ -1443,47 +1525,12 @@ async def websocket_endpoint(
             except Exception:
                 pass
 
-            if was_waiting:
-                if room_state.host_ws is not None:
-                    try:
-                        await room_state.host_ws.send_json({
-                            "type": "waiting.removed",
-                            "payload": {
-                                "user_id": user_id
-                            }
-                        })
-                    except Exception:
-                        pass
+            if role == "host":
+                await _broadcast_host_removed(room_state, user_id)
+            elif was_waiting:
+                await _notify_waiting_removed(room_state, user_id)
             elif was_active:
-                message_active_remove = {
-                    "type": "active.remove",
-                    "payload": {
-                        "user_id": user_id
-                    }
-                }
-                for ws_id, ws_active in room_state.active_ws.items():
-                    if ws_id != user_id:
-                        try:
-                            await ws_active.send_json(message_active_remove)
-                        except Exception:
-                            pass
-                if room_state.host_ws is not None:
-                    try:
-                        await room_state.host_ws.send_json(message_active_remove)
-                    except Exception:
-                        pass
-            elif role == "host" and room_state.host_user_id is not None:
-                message_active_remove_host = {
-                    "type": "active.remove",
-                    "payload": {
-                        "user_id": room_state.host_user_id
-                    }
-                }
-                for ws_active in room_state.active_ws.values():
-                    try:
-                        await ws_active.send_json(message_active_remove_host)
-                    except Exception:
-                        pass
+                await _broadcast_active_removed(room_state, user_id)
 
             room_manager.remove_connection(room_code, websocket, user_id=user_id)
     else:
