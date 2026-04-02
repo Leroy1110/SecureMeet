@@ -911,8 +911,6 @@ async def handler_kick(
         })
         return
 
-    mark_member_kicked(db=db, room_id=room_id, user_id=payload_user_id)
-
     res = room_manager.remove_user_and_get_ws(
         room_code=room_code, user_id=payload_user_id)
     if res is None:
@@ -924,6 +922,8 @@ async def handler_kick(
         })
         return
     result_state_ws, result_ws = res
+
+    mark_member_kicked(db=db, room_id=room_id, user_id=payload_user_id)
 
     try:
         await result_ws.send_json({
@@ -1509,6 +1509,11 @@ async def websocket_endpoint(
 
             if registered_connection_state is None:
                 return
+
+            try:
+                mark_member_left(db=db, room_id=room_id, user_id=user_id)
+            except Exception:
+                pass
 
             try:
                 log_event(

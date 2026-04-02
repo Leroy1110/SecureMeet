@@ -45,6 +45,7 @@ const ParticipantTile = ({
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const initials = useMemo(() => initialsForName(name), [name]);
+  const shouldRenderAudioElement = playAudioWhenAudioOnly && !showVideo;
 
   useEffect(() => {
     const videoElement = videoRef.current;
@@ -65,12 +66,12 @@ const ParticipantTile = ({
       return;
     }
 
-    audioElement.srcObject = playAudioWhenAudioOnly ? stream : null;
+    audioElement.srcObject = shouldRenderAudioElement ? stream : null;
 
     return () => {
       audioElement.srcObject = null;
     };
-  }, [playAudioWhenAudioOnly, stream]);
+  }, [shouldRenderAudioElement, stream]);
 
   const tileClassName = `relative overflow-hidden rounded-2xl border bg-slate-900 ${
     selected ? "border-blue-400 ring-2 ring-blue-300/50 dark:border-blue-500 dark:ring-blue-900/60" : "border-slate-700"
@@ -89,7 +90,7 @@ const ParticipantTile = ({
           </div>
         )}
       </div>
-      {playAudioWhenAudioOnly ? <audio ref={audioRef} autoPlay /> : null}
+      {shouldRenderAudioElement ? <audio ref={audioRef} autoPlay /> : null}
       <div className="absolute inset-x-0 bottom-0 flex items-end justify-between bg-gradient-to-t from-black/70 to-transparent p-3">
         <div>
           <p className="text-sm font-semibold text-white">{name}</p>

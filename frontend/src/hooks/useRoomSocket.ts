@@ -935,6 +935,7 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
         }
         case "system.disconnected": {
           lastOutgoingMessageTypeRef.current = null;
+          clearPersistedRoomSession();
           const message = isJsonRecord(payloadValue)
             ? pickString(payloadValue, ["message", "detail", "error", "reason"])
             : "";
