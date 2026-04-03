@@ -95,6 +95,9 @@ export type UseRoomSocketResult = {
 
 const FINAL_SESSION_STATUSES: SessionStatus[] = ["rejected", "kicked", "disconnected", "error"];
 const EXPLICIT_LEAVE_CLOSE_DELAY_MS = 150;
+const SOCKET_RECONNECT_DELAY_MS = 1_500;
+const SOCKET_RECONNECT_GRACE_WINDOW_MS = 30_000;
+const SOCKET_RECONNECT_STATUS_MESSAGE = "Connection interrupted. Reconnecting...";
 const TERMINAL_CLOSE_REASON_FRAGMENTS = [
   "room is not active",
   "room has expired",
@@ -314,8 +317,20 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
   const nextQueuedSignalIdRef = useRef(1);
   const leaveCloseTimeoutRef = useRef<number | null>(null);
   const isLeavingRoomRef = useRef(false);
+  const reconnectTimeoutRef = useRef<number | null>(null);
+  const reconnectWindowStartedAtRef = useRef<number | null>(null);
+  const suppressReconnectRef = useRef(false);
+  const [reconnectAttempt, setReconnectAttempt] = useState(0);
 
   const resetRoomLocalState = useCallback(() => {
+    if (reconnectTimeoutRef.current !== null) {
+      window.clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+
+    reconnectWindowStartedAtRef.current = null;
+    suppressReconnectRef.current = false;
+    setReconnectAttempt(0);
     setConnectionStatus("closed");
     setSessionStatus("unknown");
     setRole("");
@@ -344,6 +359,15 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
     leaveCloseTimeoutRef.current = null;
   }, []);
 
+  const clearReconnectTimeout = useCallback(() => {
+    if (reconnectTimeoutRef.current === null) {
+      return;
+    }
+
+    window.clearTimeout(reconnectTimeoutRef.current);
+    reconnectTimeoutRef.current = null;
+  }, []);
+
   const closeSocketConnection = useCallback(() => {
     clearLeaveCloseTimeout();
     const socket = socketRef.current;
@@ -370,6 +394,10 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
   const leaveRoom = useCallback(() => {
     const socket = socketRef.current;
     isLeavingRoomRef.current = true;
+    suppressReconnectRef.current = true;
+    clearReconnectTimeout();
+    reconnectWindowStartedAtRef.current = null;
+    setReconnectAttempt(0);
     lastOutgoingMessageTypeRef.current = null;
     if (socket && socket.readyState === WebSocket.OPEN) {
       try {
@@ -396,7 +424,7 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
     clearRoomSessionToken();
     setRoomToken("");
     resetRoomLocalState();
-  }, [clearLeaveCloseTimeout, closeSocketConnection, resetRoomLocalState]);
+  }, [clearLeaveCloseTimeout, clearReconnectTimeout, closeSocketConnection, resetRoomLocalState]);
 
   const consumeWebRtcSignal = useCallback((queueId: number) => {
     setQueuedWebRtcSignals((previousSignals) =>
@@ -660,6 +688,47 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
     });
   }, [sendWebRtcSignal]);
 
+  const scheduleReconnect = useCallback(() => {
+    if (isLeavingRoomRef.current || suppressReconnectRef.current) {
+      return;
+    }
+
+    if (!hasPrerequisites || socketConfig.error) {
+      return;
+    }
+
+    const now = Date.now();
+    if (reconnectWindowStartedAtRef.current === null) {
+      reconnectWindowStartedAtRef.current = now;
+    }
+
+    const elapsed = now - reconnectWindowStartedAtRef.current;
+    if (elapsed >= SOCKET_RECONNECT_GRACE_WINDOW_MS) {
+      clearReconnectTimeout();
+      reconnectWindowStartedAtRef.current = null;
+      suppressReconnectRef.current = true;
+      setConnectionStatus("error");
+      setSessionStatus("error");
+      setLastError("Connection lost and reconnect window expired.");
+      return;
+    }
+
+    if (reconnectTimeoutRef.current !== null) {
+      return;
+    }
+
+    const reconnectDelay = Math.min(
+      SOCKET_RECONNECT_DELAY_MS,
+      SOCKET_RECONNECT_GRACE_WINDOW_MS - elapsed
+    );
+    setConnectionStatus("connecting");
+    setLastError(SOCKET_RECONNECT_STATUS_MESSAGE);
+    reconnectTimeoutRef.current = window.setTimeout(() => {
+      reconnectTimeoutRef.current = null;
+      setReconnectAttempt((previousAttempt) => previousAttempt + 1);
+    }, reconnectDelay);
+  }, [clearReconnectTimeout, hasPrerequisites, socketConfig.error]);
+
   useEffect(() => {
     if (!hasPrerequisites) {
       return;
@@ -670,12 +739,15 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
     }
 
     setConnectionStatus("connecting");
-    setSessionStatus("unknown");
-    setLastError("");
+    if (reconnectWindowStartedAtRef.current === null) {
+      setSessionStatus("unknown");
+      setLastError("");
+    }
     setHostActionError("");
     setHostActionPendingKey("");
     setChatError("");
     isLeavingRoomRef.current = false;
+    suppressReconnectRef.current = false;
 
     const socket = new WebSocket(socketConfig.url);
     socketRef.current = socket;
@@ -701,40 +773,48 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
     };
 
     socket.onopen = () => {
-      if (isLeavingRoomRef.current) {
+      if (isLeavingRoomRef.current || suppressReconnectRef.current || socketRef.current !== socket) {
         return;
       }
 
+      clearReconnectTimeout();
+      reconnectWindowStartedAtRef.current = null;
       setConnectionStatus("open");
       setLastError("");
     };
 
     socket.onclose = (closeEvent) => {
-      if (isLeavingRoomRef.current) {
+      if (isLeavingRoomRef.current || suppressReconnectRef.current || socketRef.current !== socket) {
         return;
       }
 
       const closeReason = closeEvent?.reason?.trim() ?? "";
       if (isTerminalSessionCloseReason(closeReason)) {
+        suppressReconnectRef.current = true;
+        clearReconnectTimeout();
+        reconnectWindowStartedAtRef.current = null;
         clearPersistedRoomSession();
         setSessionStatus("error");
         setLastError(closeReason);
+        setConnectionStatus("error");
+        return;
       }
 
       if (!hadSocketError) {
         setConnectionStatus("closed");
       }
+
+      scheduleReconnect();
     };
 
     socket.onerror = () => {
-      if (isLeavingRoomRef.current) {
+      if (isLeavingRoomRef.current || suppressReconnectRef.current || socketRef.current !== socket) {
         return;
       }
 
       hadSocketError = true;
       setConnectionStatus("error");
-      setSessionStatus("error");
-      setLastError("WebSocket connection error.");
+      scheduleReconnect();
     };
 
     socket.onmessage = (event) => {
@@ -843,6 +923,8 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
 
       switch (messageType) {
         case "system.connected": {
+          clearReconnectTimeout();
+          reconnectWindowStartedAtRef.current = null;
           setConnectionStatus("connected");
           lastOutgoingMessageTypeRef.current = null;
           if (isJsonRecord(payloadValue)) {
@@ -890,6 +972,9 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
         }
         case "waiting.rejected": {
           lastOutgoingMessageTypeRef.current = null;
+          suppressReconnectRef.current = true;
+          clearReconnectTimeout();
+          reconnectWindowStartedAtRef.current = null;
           clearPersistedRoomSession();
           setRoomState("rejected");
           setSessionStatus("rejected");
@@ -924,6 +1009,9 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
         }
         case "system.kicked": {
           lastOutgoingMessageTypeRef.current = null;
+          suppressReconnectRef.current = true;
+          clearReconnectTimeout();
+          reconnectWindowStartedAtRef.current = null;
           clearPersistedRoomSession();
           const message = isJsonRecord(payloadValue)
             ? pickString(payloadValue, ["message", "detail", "error"])
@@ -935,6 +1023,9 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
         }
         case "system.disconnected": {
           lastOutgoingMessageTypeRef.current = null;
+          suppressReconnectRef.current = true;
+          clearReconnectTimeout();
+          reconnectWindowStartedAtRef.current = null;
           clearPersistedRoomSession();
           const message = isJsonRecord(payloadValue)
             ? pickString(payloadValue, ["message", "detail", "error", "reason"])
@@ -1041,6 +1132,9 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
           }
 
           setSessionStatus("error");
+          suppressReconnectRef.current = true;
+          clearReconnectTimeout();
+          reconnectWindowStartedAtRef.current = null;
           setLastError(message || "Room WebSocket error message received.");
           break;
         }
@@ -1054,9 +1148,19 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
         return;
       }
 
+      clearReconnectTimeout();
       closeSocketConnection();
     };
-  }, [clearPersistedRoomSession, closeSocketConnection, hasPrerequisites, socketConfig.error, socketConfig.url]);
+  }, [
+    clearPersistedRoomSession,
+    clearReconnectTimeout,
+    closeSocketConnection,
+    hasPrerequisites,
+    reconnectAttempt,
+    scheduleReconnect,
+    socketConfig.error,
+    socketConfig.url,
+  ]);
 
   const displayedError = socketConfig.error || lastError;
   const transportStatus = socketConfig.error ? "error" : connectionStatus;

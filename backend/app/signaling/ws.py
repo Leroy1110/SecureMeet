@@ -1,10 +1,12 @@
+import asyncio
+
 from fastapi import APIRouter, WebSocket, status, Depends
 from jose import JWTError
 from app.auth.security import decode_access_token as decode_room_token
 from app.signaling.room_manager import RoomManager, RoomState
 from fastapi.websockets import WebSocketDisconnect
 from sqlalchemy.orm import Session
-from app.db.session import get_db
+from app.db.session import get_db, SessionLocal
 from app.rooms.service import update_user_state, mark_member_left, mark_member_kicked
 from datetime import datetime
 from app.rooms.messages_service import save_message
@@ -14,14 +16,11 @@ from app.logging.audit import log_event
 router = APIRouter()
 
 room_manager: RoomManager = RoomManager()
+DISCONNECT_GRACE_PERIOD_SECONDS = 30
 
 
 def build_active_user_ids(room_state: RoomState) -> list[int]:
-    users = list(room_state.active_ws.keys())
-    host_user_id = room_state.host_user_id
-    if host_user_id is not None and host_user_id not in users:
-        users.append(host_user_id)
-    return users
+    return room_state.get_active_user_ids()
 
 
 def _resolve_display_names(db: Session, room_id: int,
@@ -81,7 +80,7 @@ def build_waiting_users_payload(
         db: Session,
         room_id: int,
         room_state: RoomState) -> list[dict]:
-    return _serialize_users(db, room_id, list(room_state.waiting_ws.keys()))
+    return _serialize_users(db, room_id, room_state.get_waiting_user_ids())
 
 
 def build_active_users_payload(
@@ -238,6 +237,55 @@ async def _broadcast_host_removed(room_state: RoomState, host_user_id: int):
             await ws_active.send_json(message_active_remove_host)
         except Exception:
             pass
+
+
+async def _finalize_disconnect_after_grace(
+    *,
+    room_code: str,
+    room_id: int,
+    user_id: int,
+    disconnect_id: str,
+):
+    await asyncio.sleep(DISCONNECT_GRACE_PERIOD_SECONDS)
+
+    finalized_disconnect = room_manager.finalize_pending_disconnect(
+        room_code=room_code,
+        user_id=user_id,
+        disconnect_id=disconnect_id,
+    )
+    if finalized_disconnect is None:
+        return
+
+    db = SessionLocal()
+    try:
+        mark_member_left(db=db, room_id=room_id, user_id=user_id)
+        log_event(
+            db=db,
+            event_type="WS_DISCONNECT_FINALIZED",
+            room_id=room_id,
+            user_id=user_id,
+            data={
+                "room_code": room_code,
+                "role": finalized_disconnect.role,
+                "state": finalized_disconnect.state,
+                "grace_seconds": DISCONNECT_GRACE_PERIOD_SECONDS,
+            }
+        )
+    except Exception:
+        pass
+    finally:
+        db.close()
+
+    room_state = room_manager.get_room(room_code)
+    if room_state is None:
+        return
+
+    if finalized_disconnect.role == "host":
+        await _broadcast_host_removed(room_state, user_id)
+    elif finalized_disconnect.state == "waiting":
+        await _notify_waiting_removed(room_state, user_id)
+    elif finalized_disconnect.state == "active":
+        await _broadcast_active_removed(room_state, user_id)
 
 
 async def _relay_webrtc_payload(
@@ -500,7 +548,7 @@ async def handler_approve(
         })
         return
 
-    if payload_user_id not in room_state.waiting_ws:
+    if not room_manager.is_waiting_user(room_code=room_code, user_id=payload_user_id):
         await websocket.send_json({
             "type": "error",
             "payload": {
@@ -574,10 +622,10 @@ async def handler_approve(
         return
 
     if user_status:
-        user_approved = room_manager.approve_user(
+        approval_success, user_approved = room_manager.approve_user(
             room_code=room_code, user_id=payload_user_id)
 
-        if user_approved is None:
+        if not approval_success:
             await websocket.send_json({
                 "type": "error",
                 "payload": {
@@ -597,17 +645,18 @@ async def handler_approve(
             }
         )
 
-        await user_approved.send_json({
-            "type": "waiting.approved",
-            "payload": {}
-        })
-        await user_approved.send_json({
-            "type": "active.list",
-            "payload": {
-                "room_code": room_code,
-                "users": build_active_users_payload(db, room_id, room_state)
-            }
-        })
+        if user_approved is not None:
+            await user_approved.send_json({
+                "type": "waiting.approved",
+                "payload": {}
+            })
+            await user_approved.send_json({
+                "type": "active.list",
+                "payload": {
+                    "room_code": room_code,
+                    "users": build_active_users_payload(db, room_id, room_state)
+                }
+            })
 
         await websocket.send_json({
             "type": "waiting.removed",
@@ -665,7 +714,7 @@ async def handler_reject(
         })
         return
 
-    if payload_user_id not in room_state.waiting_ws:
+    if not room_manager.is_waiting_user(room_code=room_code, user_id=payload_user_id):
         await websocket.send_json({
             "type": "error",
             "payload": {
@@ -692,10 +741,10 @@ async def handler_reject(
         return
 
     if user_status:
-        user_rejected = room_manager.reject_user(
+        rejection_success, user_rejected = room_manager.reject_user(
             room_code=room_code, user_id=payload_user_id)
 
-        if user_rejected is None:
+        if not rejection_success:
             await websocket.send_json({
                 "type": "error",
                 "payload": {
@@ -715,15 +764,16 @@ async def handler_reject(
             }
         )
 
-        await user_rejected.send_json({
-            "type": "waiting.rejected",
-            "payload": {}
-        })
+        if user_rejected is not None:
+            await user_rejected.send_json({
+                "type": "waiting.rejected",
+                "payload": {}
+            })
 
-        await user_rejected.close(
-            code=status.WS_1000_NORMAL_CLOSURE,
-            reason="rejected by host",
-        )
+            await user_rejected.close(
+                code=status.WS_1000_NORMAL_CLOSURE,
+                reason="rejected by host",
+            )
 
         await websocket.send_json({
             "type": "waiting.removed",
@@ -925,17 +975,18 @@ async def handler_kick(
 
     mark_member_kicked(db=db, room_id=room_id, user_id=payload_user_id)
 
-    try:
-        await result_ws.send_json({
-            "type": "system.kicked",
-            "payload": {}
-        })
-        await result_ws.close(
-            code=status.WS_1008_POLICY_VIOLATION,
-            reason="kicked by host",
-        )
-    except Exception:
-        pass
+    if result_ws is not None:
+        try:
+            await result_ws.send_json({
+                "type": "system.kicked",
+                "payload": {}
+            })
+            await result_ws.close(
+                code=status.WS_1008_POLICY_VIOLATION,
+                reason="kicked by host",
+            )
+        except Exception:
+            pass
 
     log_event(
         db=db,
@@ -1510,34 +1561,41 @@ async def websocket_endpoint(
             if registered_connection_state is None:
                 return
 
-            try:
-                mark_member_left(db=db, room_id=room_id, user_id=user_id)
-            except Exception:
-                pass
+            pending_disconnect = room_manager.begin_disconnect_grace(
+                room_code=room_code,
+                ws=websocket,
+                user_id=user_id,
+                role=role,
+                state=registered_connection_state,
+                grace_period_seconds=DISCONNECT_GRACE_PERIOD_SECONDS,
+            )
+            if pending_disconnect is None:
+                return
 
             try:
                 log_event(
                     db=db,
-                    event_type="WS_DISCONNECT",
+                    event_type="WS_DISCONNECT_PENDING",
                     room_id=room_id,
                     user_id=user_id,
                     data={
                         "room_code": room_code,
                         "was_waiting": was_waiting,
-                        "was_active": was_active
+                        "was_active": was_active,
+                        "grace_seconds": DISCONNECT_GRACE_PERIOD_SECONDS,
                     }
                 )
             except Exception:
                 pass
 
-            if role == "host":
-                await _broadcast_host_removed(room_state, user_id)
-            elif was_waiting:
-                await _notify_waiting_removed(room_state, user_id)
-            elif was_active:
-                await _broadcast_active_removed(room_state, user_id)
-
-            room_manager.remove_connection(room_code, websocket, user_id=user_id)
+            asyncio.create_task(
+                _finalize_disconnect_after_grace(
+                    room_code=room_code,
+                    room_id=room_id,
+                    user_id=user_id,
+                    disconnect_id=pending_disconnect.disconnect_id,
+                )
+            )
     else:
         await websocket.close(
             code=status.WS_1008_POLICY_VIOLATION,
