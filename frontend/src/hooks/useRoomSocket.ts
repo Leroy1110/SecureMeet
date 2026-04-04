@@ -668,7 +668,9 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
 
     const stillValid = chatRecipientOptions.some((option) => option.userId === selectedRecipientUserId);
     if (!stillValid) {
-      setSelectedRecipientUserId(null);
+      queueMicrotask(() => {
+        setSelectedRecipientUserId(null);
+      });
     }
   }, [chatRecipientOptions, selectedRecipientUserId]);
 
@@ -838,14 +840,22 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
       return;
     }
 
-    setConnectionStatus("connecting");
-    if (reconnectWindowStartedAtRef.current === null) {
-      setSessionStatus("unknown");
-      setLastError("");
-    }
-    setHostActionError("");
-    setPendingHostAction(null);
-    setChatError("");
+    let disposed = false;
+    queueMicrotask(() => {
+      if (disposed) {
+        return;
+      }
+
+      setConnectionStatus("connecting");
+      if (reconnectWindowStartedAtRef.current === null) {
+        setSessionStatus("unknown");
+        setLastError("");
+      }
+      setHostActionError("");
+      setPendingHostAction(null);
+      setChatError("");
+    });
+
     isLeavingRoomRef.current = false;
     suppressReconnectRef.current = false;
 
@@ -1260,6 +1270,7 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
     };
 
     return () => {
+      disposed = true;
       if (isLeavingRoomRef.current && leaveCloseTimeoutRef.current !== null) {
         return;
       }

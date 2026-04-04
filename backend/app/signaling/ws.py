@@ -1476,11 +1476,13 @@ async def websocket_endpoint(
                     return
 
                 if message_type == "room.leave":
-                    registered_connection_state = room_manager.get_registered_connection_state(
-                        room_code=room_code,
-                        ws=websocket,
-                        user_id=user_id,
-                        role=role,
+                    registered_connection_state = (
+                        room_manager.get_registered_connection_state(
+                            room_code=room_code,
+                            ws=websocket,
+                            user_id=user_id,
+                            role=role,
+                        )
                     )
                     if registered_connection_state is None:
                         await websocket.close(
@@ -1494,7 +1496,11 @@ async def websocket_endpoint(
                     except Exception:
                         pass
 
-                    room_manager.remove_connection(room_code, websocket, user_id=user_id)
+                    room_manager.remove_connection(
+                        room_code,
+                        websocket,
+                        user_id=user_id,
+                    )
 
                     try:
                         log_event(

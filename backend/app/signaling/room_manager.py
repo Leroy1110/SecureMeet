@@ -231,7 +231,10 @@ class RoomManager:
         self._cleanup_room_if_empty(room_code)
         return pending_disconnect
 
-    def approve_user(self, room_code: str, user_id: int) -> tuple[bool, WebSocket | None]:
+    def approve_user(
+            self,
+            room_code: str,
+            user_id: int) -> tuple[bool, WebSocket | None]:
         if room_code not in self.rooms:
             return (False, None)
 
@@ -251,7 +254,10 @@ class RoomManager:
 
         return (False, None)
 
-    def reject_user(self, room_code: str, user_id: int) -> tuple[bool, WebSocket | None]:
+    def reject_user(
+            self,
+            room_code: str,
+            user_id: int) -> tuple[bool, WebSocket | None]:
         if room_code not in self.rooms:
             return (False, None)
 
