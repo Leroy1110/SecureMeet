@@ -88,7 +88,7 @@ function RoomPage() {
     displayedError,
     hasPrerequisites,
     hostActionError,
-    hostActionPendingKey,
+    hasHostActionPending,
     isFinalState,
     isHost,
     isSocketOpen,
@@ -906,7 +906,7 @@ function RoomPage() {
         <WaitingPanel
           waitingUsers={waitingUsers}
           hostActionError={hostActionError}
-          hostActionPendingKey={hostActionPendingKey}
+          hasHostActionPending={hasHostActionPending}
           onApprove={(userId) => sendHostWaitingAction("waiting.approve", userId)}
           onReject={(userId) => sendHostWaitingAction("waiting.reject", userId)}
         />
@@ -917,7 +917,6 @@ function RoomPage() {
               const userId = user.userId;
               const canKick = userId !== null && userId !== localUserId;
               const userLabel = user.label || (userId !== null ? `User ${userId}` : "Unknown user");
-              const kickKey = userId ? `member.kick:${userId}` : "";
 
               return (
                 <li
@@ -929,7 +928,7 @@ function RoomPage() {
                     <button
                       type="button"
                       onClick={() => sendHostKickAction(userId)}
-                      disabled={hostActionPendingKey === kickKey}
+                      disabled={hasHostActionPending}
                       className="inline-flex h-9 items-center justify-center rounded-lg border border-red-300 bg-red-50 px-3 text-xs font-medium text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/60"
                     >
                       Kick

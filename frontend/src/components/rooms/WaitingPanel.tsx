@@ -15,7 +15,7 @@ const getPresenceUserLabel = (user: RoomPresenceUser): string => {
 type WaitingPanelProps = {
   waitingUsers: RoomPresenceUser[];
   hostActionError: string;
-  hostActionPendingKey: string;
+  hasHostActionPending: boolean;
   onApprove: (userId: number | null) => void;
   onReject: (userId: number | null) => void;
 };
@@ -23,7 +23,7 @@ type WaitingPanelProps = {
 const WaitingPanel = ({
   waitingUsers,
   hostActionError,
-  hostActionPendingKey,
+  hasHostActionPending,
   onApprove,
   onReject,
 }: WaitingPanelProps) => {
@@ -43,8 +43,6 @@ const WaitingPanel = ({
             const userLabel = getPresenceUserLabel(user);
             const userId = user.userId;
             const canModerate = userId !== null;
-            const approveKey = userId ? `waiting.approve:${userId}` : "";
-            const rejectKey = userId ? `waiting.reject:${userId}` : "";
 
             return (
               <li
@@ -56,7 +54,7 @@ const WaitingPanel = ({
                   <button
                     type="button"
                     onClick={() => onApprove(userId)}
-                    disabled={!canModerate || hostActionPendingKey === approveKey}
+                    disabled={!canModerate || hasHostActionPending}
                     className="inline-flex h-9 items-center justify-center rounded-lg border border-emerald-300 bg-emerald-50 px-3 text-xs font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-900/40 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-950/60"
                   >
                     Approve
@@ -64,7 +62,7 @@ const WaitingPanel = ({
                   <button
                     type="button"
                     onClick={() => onReject(userId)}
-                    disabled={!canModerate || hostActionPendingKey === rejectKey}
+                    disabled={!canModerate || hasHostActionPending}
                     className="inline-flex h-9 items-center justify-center rounded-lg border border-red-300 bg-red-50 px-3 text-xs font-medium text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/60"
                   >
                     Reject

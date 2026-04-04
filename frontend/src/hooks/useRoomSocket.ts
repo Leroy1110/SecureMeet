@@ -15,6 +15,13 @@ export type SessionStatus = "unknown" | "waiting" | "active" | "rejected" | "kic
 export type HostMemberActionType = "waiting.approve" | "waiting.reject" | "member.kick";
 export type WebRtcMessageType = "webrtc.offer" | "webrtc.answer" | "webrtc.ice_candidate";
 export type OutgoingMessageType = HostMemberActionType | "chat.send" | WebRtcMessageType | "room.leave";
+type PendingHostActionTargetScope = "waiting" | "active" | "either";
+type PendingHostAction = {
+  type: HostMemberActionType;
+  userId: number;
+  startedAt: number;
+  expectedRemovalFrom: PendingHostActionTargetScope;
+};
 
 export type RoomPresenceUser = {
   userId: number | null;
@@ -62,6 +69,7 @@ export type UseRoomSocketResult = {
   lastMessageType: string;
   lastError: string;
   hostActionError: string;
+  hasHostActionPending: boolean;
   hostActionPendingKey: string;
   chatMessages: ChatMessage[];
   chatInput: string;
@@ -98,6 +106,18 @@ const EXPLICIT_LEAVE_CLOSE_DELAY_MS = 150;
 const SOCKET_RECONNECT_DELAY_MS = 1_500;
 const SOCKET_RECONNECT_GRACE_WINDOW_MS = 30_000;
 const SOCKET_RECONNECT_STATUS_MESSAGE = "Connection interrupted. Reconnecting...";
+const HOST_MODERATION_PENDING_TIMEOUT_MS = 8_000;
+const HOST_MODERATION_ERROR_FRAGMENTS = [
+  "only host can approve or reject",
+  "only host can kick",
+  "invalid user_id in payload",
+  "user not in waiting",
+  "failed to approve user",
+  "failed to reject user",
+  "failed to kick",
+  "host cannot be kicked",
+  "user not connected",
+];
 const TERMINAL_CLOSE_REASON_FRAGMENTS = [
   "room is not active",
   "room has expired",
@@ -125,6 +145,8 @@ const buildUserLabel = (userId: number | null, label: string): string => {
 
 const getRoomPresenceUserKey = (user: RoomPresenceUser): string =>
   user.userId !== null ? `id:${user.userId}` : `label:${user.label.toLowerCase()}`;
+const isUserInPresenceList = (users: RoomPresenceUser[], userId: number): boolean =>
+  users.some((user) => user.userId === userId);
 
 const extractPresenceUser = (value: unknown): RoomPresenceUser | null => {
   if (typeof value === "number") {
@@ -305,7 +327,7 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
   const [lastMessageType, setLastMessageType] = useState("");
   const [lastError, setLastError] = useState("");
   const [hostActionError, setHostActionError] = useState("");
-  const [hostActionPendingKey, setHostActionPendingKey] = useState("");
+  const [pendingHostAction, setPendingHostAction] = useState<PendingHostAction | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatError, setChatError] = useState("");
@@ -321,6 +343,8 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
   const reconnectWindowStartedAtRef = useRef<number | null>(null);
   const suppressReconnectRef = useRef(false);
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
+  const hasHostActionPending = pendingHostAction !== null;
+  const hostActionPendingKey = pendingHostAction ? `${pendingHostAction.type}:${pendingHostAction.userId}` : "";
 
   const resetRoomLocalState = useCallback(() => {
     if (reconnectTimeoutRef.current !== null) {
@@ -340,7 +364,7 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
     setLastMessageType("");
     setLastError("");
     setHostActionError("");
-    setHostActionPendingKey("");
+    setPendingHostAction(null);
     setChatMessages([]);
     setChatInput("");
     setChatError("");
@@ -485,9 +509,27 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
       return;
     }
 
+    if (hasHostActionPending) {
+      setHostActionError("Please wait for the current moderation action to finish.");
+      return;
+    }
+
+    const expectedRemovalFrom: PendingHostActionTargetScope =
+      messageType === "member.kick"
+        ? isUserInPresenceList(waitingUsers, userId)
+          ? "waiting"
+          : isUserInPresenceList(activeUsers, userId)
+            ? "active"
+            : "active"
+        : "waiting";
+
     setHostActionError("");
-    const actionKey = `${messageType}:${userId}`;
-    setHostActionPendingKey(actionKey);
+    setPendingHostAction({
+      type: messageType,
+      userId,
+      startedAt: Date.now(),
+      expectedRemovalFrom,
+    });
     lastOutgoingMessageTypeRef.current = messageType;
 
     try {
@@ -501,13 +543,12 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
       );
     } catch {
       lastOutgoingMessageTypeRef.current = null;
+      setPendingHostAction(null);
       if (messageType === "member.kick") {
         setHostActionError("Failed to kick active user.");
       } else {
         setHostActionError(`Failed to ${messageType === "waiting.approve" ? "approve" : "reject"} waiting user.`);
       }
-    } finally {
-      setHostActionPendingKey("");
     }
   };
 
@@ -560,6 +601,65 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
 
     setSelectedRecipientUserId(parsedUserId);
   };
+
+  useEffect(() => {
+    if (!pendingHostAction) {
+      return;
+    }
+
+    const pendingUserId = pendingHostAction.userId;
+    const isInWaiting = isUserInPresenceList(waitingUsers, pendingUserId);
+    const isInActive = isUserInPresenceList(activeUsers, pendingUserId);
+
+    const shouldResolve =
+      pendingHostAction.type === "waiting.approve"
+        ? !isInWaiting && isInActive
+        : pendingHostAction.type === "waiting.reject"
+          ? !isInWaiting
+          : pendingHostAction.expectedRemovalFrom === "waiting"
+            ? !isInWaiting
+            : pendingHostAction.expectedRemovalFrom === "active"
+              ? !isInActive
+              : !isInWaiting && !isInActive;
+
+    if (!shouldResolve) {
+      return;
+    }
+
+    queueMicrotask(() => {
+      setPendingHostAction(null);
+      setHostActionError("");
+      if (lastOutgoingMessageTypeRef.current === pendingHostAction.type) {
+        lastOutgoingMessageTypeRef.current = null;
+      }
+    });
+  }, [activeUsers, pendingHostAction, waitingUsers]);
+
+  useEffect(() => {
+    if (!pendingHostAction) {
+      return;
+    }
+
+    const pendingStartedAt = pendingHostAction.startedAt;
+    const timeoutId = window.setTimeout(() => {
+      setPendingHostAction((currentPendingHostAction) => {
+        if (!currentPendingHostAction || currentPendingHostAction.startedAt !== pendingStartedAt) {
+          return currentPendingHostAction;
+        }
+
+        if (lastOutgoingMessageTypeRef.current === currentPendingHostAction.type) {
+          lastOutgoingMessageTypeRef.current = null;
+        }
+
+        setHostActionError("Moderation update timed out. Please retry.");
+        return null;
+      });
+    }, HOST_MODERATION_PENDING_TIMEOUT_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [pendingHostAction]);
 
   useEffect(() => {
     if (selectedRecipientUserId === null) {
@@ -744,7 +844,7 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
       setLastError("");
     }
     setHostActionError("");
-    setHostActionPendingKey("");
+    setPendingHostAction(null);
     setChatError("");
     isLeavingRoomRef.current = false;
     suppressReconnectRef.current = false;
@@ -1131,6 +1231,22 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
             break;
           }
 
+          const isPendingHostModerationAction =
+            lastOutgoingMessageTypeRef.current === "waiting.approve" ||
+            lastOutgoingMessageTypeRef.current === "waiting.reject" ||
+            lastOutgoingMessageTypeRef.current === "member.kick";
+          const isHostModerationError = HOST_MODERATION_ERROR_FRAGMENTS.some((fragment) =>
+            normalizedMessage.includes(fragment)
+          );
+          if (isPendingHostModerationAction || isHostModerationError) {
+            setHostActionError(message || "Failed to complete host moderation action.");
+            setPendingHostAction(null);
+            if (isPendingHostModerationAction) {
+              lastOutgoingMessageTypeRef.current = null;
+            }
+            break;
+          }
+
           setSessionStatus("error");
           suppressReconnectRef.current = true;
           clearReconnectTimeout();
@@ -1189,6 +1305,7 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
     normalizedRoomCode,
     prerequisiteErrors,
     displayedError,
+    hasHostActionPending,
     canSendChat,
     canSendWebRtc,
     isSocketOpen,
