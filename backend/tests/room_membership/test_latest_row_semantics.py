@@ -71,6 +71,10 @@ def _create_member(
     role: str = "participant",
     display_name: str = "Name",
 ) -> RoomMember:
+    left_at = None
+    if state in {"left", "kicked", "rejected"}:
+        left_at = datetime.utcnow()
+
     member = RoomMember(
         room_id=room_id,
         user_id=user_id,
@@ -78,6 +82,7 @@ def _create_member(
         role=role,
         state=state,
         joined_at=datetime.utcnow(),
+        left_at=left_at,
     )
     db.add(member)
     db.commit()
@@ -89,16 +94,21 @@ def test_update_user_state_updates_latest_waiting_row(db_session: Session) -> No
     user = _create_user(db_session, user_id=1, username="alice")
     room = _create_room(db_session, host_id=user.id)
 
-    older_waiting = _create_member(db_session, room.id, user.id, state="waiting")
+    older_terminal = _create_member(
+        db_session,
+        room.id,
+        user.id,
+        state="rejected",
+    )
     latest_waiting = _create_member(db_session, room.id, user.id, state="waiting")
 
     updated = update_user_state(
         db=db_session, room_id=room.id, user_id=user.id, new_state="active")
     assert updated is True
 
-    db_session.refresh(older_waiting)
+    db_session.refresh(older_terminal)
     db_session.refresh(latest_waiting)
-    assert older_waiting.state == "waiting"
+    assert older_terminal.state == "rejected"
     assert latest_waiting.state == "active"
 
 
@@ -108,14 +118,14 @@ def test_mark_member_left_and_kicked_target_latest_row_only(
     user = _create_user(db_session, user_id=2, username="bob")
     room = _create_room(db_session, host_id=user.id)
 
-    older = _create_member(db_session, room.id, user.id, state="active")
+    older = _create_member(db_session, room.id, user.id, state="left")
     latest = _create_member(db_session, room.id, user.id, state="active")
 
     mark_member_left(db=db_session, room_id=room.id, user_id=user.id)
 
     db_session.refresh(older)
     db_session.refresh(latest)
-    assert older.state == "active"
+    assert older.state == "left"
     assert latest.state == "left"
     assert latest.left_at is not None
 
@@ -148,7 +158,7 @@ def test_join_room_allows_rejoin_when_latest_row_is_terminal(
     participant = _create_user(db_session, user_id=21, username="charlie")
     room = _create_room(db_session, room_code="JOINME", host_id=host.id)
 
-    _create_member(db_session, room.id, participant.id, state="active")
+    _create_member(db_session, room.id, participant.id, state="rejected")
     _create_member(db_session, room.id, participant.id, state="left")
 
     token = join_room(
@@ -177,7 +187,7 @@ def test_validate_room_for_ws_connect_uses_latest_row_state(
     participant = _create_user(db_session, user_id=31, username="dana")
     room = _create_room(db_session, room_code="WSROOM", host_id=host.id)
 
-    _create_member(db_session, room.id, participant.id, state="waiting")
+    _create_member(db_session, room.id, participant.id, state="rejected")
     _create_member(db_session, room.id, participant.id, state="kicked")
 
     with pytest.raises(ValueError, match="member state not allowed"):

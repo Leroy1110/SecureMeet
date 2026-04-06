@@ -281,7 +281,9 @@ def update_user_state(
         raise ValueError("Invalid state")
 
     room_member.state = new_state
-    if left_at:
+    if new_state == "rejected":
+        room_member.left_at = left_at or datetime.utcnow()
+    elif left_at:
         room_member.left_at = left_at
 
     try:

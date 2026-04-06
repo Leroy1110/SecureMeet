@@ -1,4 +1,14 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
+from sqlalchemy import (
+    CheckConstraint,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy.sql import func
 from app.db.base import Base
 
@@ -29,6 +39,38 @@ class Room(Base):
 
 class RoomMember(Base):
     __tablename__ = "room_members"
+    __table_args__ = (
+        CheckConstraint(
+            "role IN ('host', 'participant')",
+            name="ck_room_members_role_valid",
+        ),
+        CheckConstraint(
+            "state IN ('waiting', 'active', 'left', 'kicked', 'rejected')",
+            name="ck_room_members_state_valid",
+        ),
+        CheckConstraint(
+            "("
+            "(state IN ('waiting', 'active') AND left_at IS NULL)"
+            " OR "
+            "(state IN ('left', 'kicked', 'rejected') AND left_at IS NOT NULL)"
+            ")",
+            name="ck_room_members_left_at_lifecycle",
+        ),
+        Index(
+            "ix_room_members_room_user_latest",
+            "room_id",
+            "user_id",
+            "id",
+        ),
+        Index(
+            "uq_room_members_single_live_membership",
+            "room_id",
+            "user_id",
+            unique=True,
+            sqlite_where=text("state IN ('waiting', 'active')"),
+            postgresql_where=text("state IN ('waiting', 'active')"),
+        ),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     room_id = Column(Integer, ForeignKey("rooms.id"), nullable=False, index=True)
