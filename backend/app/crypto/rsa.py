@@ -40,21 +40,20 @@ def load_or_create_rsa_keypair() -> tuple[RSAPrivateKey, RSAPublicKey]:
 
         with PRIVATE_KEY_FILE.open("wb") as private_file:
             private_file.write(private_pem_key)
-       
+
         with PUBLIC_KEY_FILE.open("wb") as public_file:
             public_file.write(public_pem_key)
-        
+
         private_key = keypair
         public_key = keypair.public_key()
-    
-    return private_key, public_key
 
+    return private_key, public_key
 
 
 def encrypt_room_key(room_key: bytes) -> str:
     if not isinstance(room_key, (bytes, bytearray)):
         raise TypeError("room_key must be bytes")
-    
+
     if len(room_key) > 190:
         raise ValueError("room_key too long to encrypt with RSA")
 
@@ -74,10 +73,11 @@ def encrypt_room_key(room_key: bytes) -> str:
 
     return result_encrypted_key
 
+
 def decrypt_room_key(encrypted_key: str) -> bytes:
     if not isinstance(encrypted_key, str):
         raise TypeError("encrypted_key must be string")
-    
+
     b64_bytes = encrypted_key.encode('ascii')
     cipher_bytes = base64.b64decode(b64_bytes)
 

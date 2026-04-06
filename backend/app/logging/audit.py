@@ -3,7 +3,14 @@ import json
 from sqlalchemy.orm import Session
 from app.db.models import EventLog
 
-def log_event(db: Session, *, event_type: str, room_id: int | None, user_id: int | None, data: dict | None = None) -> None:
+
+def log_event(
+        db: Session,
+        *,
+        event_type: str,
+        room_id: int | None,
+        user_id: int | None,
+        data: dict | None = None) -> None:
     try:
         event = EventLog(
             room_id=room_id,

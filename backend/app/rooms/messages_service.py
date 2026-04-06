@@ -9,11 +9,12 @@ def get_room_key(db: Session, room_id: int) -> bytes:
     room = db.query(Room).filter(Room.id == room_id).first()
     if not room:
         raise ValueError("Room not found")
-    
+
     encrypted = room.encryption_key_encrypted
     room_key_bytes = decrypt_room_key(encrypted)
 
     return room_key_bytes
+
 
 def save_message(
     db: Session,
@@ -27,7 +28,7 @@ def save_message(
         room_key = get_room_key(db=db, room_id=room_id)
     except ValueError:
         raise ValueError("Failed to get room key for message encryption")
-    
+
     ciphertext = encrypt_message(plaintext=content_plain, room_key=room_key)
     new_message = Message(
         room_id=room_id,

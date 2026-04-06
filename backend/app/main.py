@@ -18,10 +18,12 @@ app.include_router(auth_router, prefix="/auth", tags=["auth"])
 app.include_router(rooms_router, prefix="/rooms", tags=["rooms"])
 app.include_router(signaling_router, tags=["signaling"])
 
+
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
 
+
 @app.get("/health")
 def health_check() -> dict[str, str]:
-    return {"status": "ok", "service" : "backend"}
+    return {"status": "ok", "service": "backend"}

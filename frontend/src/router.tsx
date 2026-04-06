@@ -6,7 +6,6 @@ import RoomPage from "./pages/RoomPage";
 import NotFoundPage from "./pages/NotFoundPage";
 
 import AuthLayout from "./components/layout/AuthLayout";
-import PageShell from "./components/layout/PageShell";
 import RequireAuth from "./components/auth/RequireAuth";
 import RedirectIfAuthenticated from "./components/auth/RedirectIfAuthenticated";
 
@@ -24,9 +23,7 @@ function AppRouter() {
         </Route>
 
         <Route element={<RequireAuth />}>
-          <Route element={<PageShell />}>
-            <Route path="dashboard" element={<DashboardPage />} />
-          </Route>
+          <Route path="dashboard" element={<DashboardPage />} />
         </Route>
 
         <Route path="rooms/:roomCode" element={<RoomPage />} />

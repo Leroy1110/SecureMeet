@@ -1,12 +1,15 @@
 from pydantic import BaseModel, EmailStr, ConfigDict
 from datetime import datetime
 
+
 class UserBase(BaseModel):
     email: EmailStr
     username: str
 
+
 class UserRegistrationRequest(UserBase):
     password: str
+
 
 class UserResponse(UserBase):
     id: int
@@ -14,9 +17,11 @@ class UserResponse(UserBase):
 
     model_config = ConfigDict(from_attributes=True)
 
+
 class UserLoginRequest(BaseModel):
     email: EmailStr
     password: str
+
 
 class Token(BaseModel):
     access_token: str
