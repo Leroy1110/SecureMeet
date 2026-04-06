@@ -50,7 +50,10 @@ def get_latest_room_members_map(
 
     latest_members = (
         db.query(RoomMember)
-        .join(latest_members_subquery, RoomMember.id == latest_members_subquery.c.latest_id)
+        .join(
+            latest_members_subquery,
+            RoomMember.id == latest_members_subquery.c.latest_id,
+        )
         .all()
     )
 
@@ -70,7 +73,10 @@ def count_current_active_members(db: Session, room_id: int) -> int:
 
     return (
         db.query(RoomMember)
-        .join(latest_members_subquery, RoomMember.id == latest_members_subquery.c.latest_id)
+        .join(
+            latest_members_subquery,
+            RoomMember.id == latest_members_subquery.c.latest_id,
+        )
         .filter(RoomMember.state == "active")
         .count()
     )
@@ -181,7 +187,10 @@ def join_room(
         raise ValueError("Invalid room password")
 
     latest_room_member = get_latest_room_member(db, room.id, user_id)
-    if latest_room_member is not None and latest_room_member.state in {"active", "waiting"}:
+    if (
+        latest_room_member is not None
+        and latest_room_member.state in {"active", "waiting"}
+    ):
         raise ValueError("Already joined")
 
     count_members = count_current_active_members(db, room.id)

@@ -14,12 +14,18 @@ from app.rooms.service import (
     mark_member_left,
     update_user_state,
 )
-from app.signaling.ws import _resolve_display_names, validate_room_for_ws_connect
+from app.signaling.ws import (
+    _resolve_display_names,
+    validate_room_for_ws_connect,
+)
 
 
 @pytest.fixture
 def db_session() -> Session:
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+    )
     SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     Base.metadata.create_all(bind=engine)
     session = SessionLocal()
@@ -96,7 +102,9 @@ def test_update_user_state_updates_latest_waiting_row(db_session: Session) -> No
     assert latest_waiting.state == "active"
 
 
-def test_mark_member_left_and_kicked_target_latest_row_only(db_session: Session) -> None:
+def test_mark_member_left_and_kicked_target_latest_row_only(
+    db_session: Session,
+) -> None:
     user = _create_user(db_session, user_id=2, username="bob")
     room = _create_room(db_session, host_id=user.id)
 
@@ -119,7 +127,9 @@ def test_mark_member_left_and_kicked_target_latest_row_only(db_session: Session)
     assert latest_second.left_at is not None
 
 
-def test_count_current_active_members_uses_latest_rows_only(db_session: Session) -> None:
+def test_count_current_active_members_uses_latest_rows_only(
+    db_session: Session,
+) -> None:
     host = _create_user(db_session, user_id=10, username="host")
     participant = _create_user(db_session, user_id=11, username="participant")
     room = _create_room(db_session, host_id=host.id)
@@ -131,7 +141,9 @@ def test_count_current_active_members_uses_latest_rows_only(db_session: Session)
     assert count_current_active_members(db_session, room.id) == 1
 
 
-def test_join_room_allows_rejoin_when_latest_row_is_terminal(db_session: Session) -> None:
+def test_join_room_allows_rejoin_when_latest_row_is_terminal(
+    db_session: Session,
+) -> None:
     host = _create_user(db_session, user_id=20, username="host2")
     participant = _create_user(db_session, user_id=21, username="charlie")
     room = _create_room(db_session, room_code="JOINME", host_id=host.id)
@@ -158,7 +170,9 @@ def test_join_room_allows_rejoin_when_latest_row_is_terminal(db_session: Session
     assert latest.state == "waiting"
 
 
-def test_validate_room_for_ws_connect_uses_latest_row_state(db_session: Session) -> None:
+def test_validate_room_for_ws_connect_uses_latest_row_state(
+    db_session: Session,
+) -> None:
     host = _create_user(db_session, user_id=30, username="host3")
     participant = _create_user(db_session, user_id=31, username="dana")
     room = _create_room(db_session, room_code="WSROOM", host_id=host.id)
