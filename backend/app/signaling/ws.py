@@ -7,10 +7,17 @@ from app.signaling.room_manager import RoomManager, RoomState
 from fastapi.websockets import WebSocketDisconnect
 from sqlalchemy.orm import Session
 from app.db.session import get_db, SessionLocal
-from app.rooms.service import update_user_state, mark_member_left, mark_member_kicked
+from app.rooms.service import (
+    count_current_active_members,
+    get_latest_room_member,
+    get_latest_room_members_map,
+    mark_member_kicked,
+    mark_member_left,
+    update_user_state,
+)
 from datetime import datetime
 from app.rooms.messages_service import save_message
-from app.db.models import Room, RoomMember
+from app.db.models import Room
 from app.logging.audit import log_event
 
 router = APIRouter()
@@ -29,15 +36,19 @@ def _resolve_display_names(db: Session, room_id: int,
     if not normalized_user_ids:
         return {}
 
-    room_members = (
-        db.query(
-            RoomMember.user_id,
-            RoomMember.display_name) .filter(
-            RoomMember.room_id == room_id,
-            RoomMember.user_id.in_(normalized_user_ids)) .all())
+    room_members = get_latest_room_members_map(
+        db=db,
+        room_id=room_id,
+        user_ids=normalized_user_ids,
+    )
 
     display_names: dict[int, str] = {}
-    for user_id, display_name in room_members:
+    for user_id in normalized_user_ids:
+        room_member = room_members.get(user_id)
+        if room_member is None:
+            continue
+
+        display_name = room_member.display_name
         if isinstance(display_name, str) and display_name.strip():
             display_names[user_id] = display_name.strip()
 
@@ -130,9 +141,7 @@ def validate_room_for_ws_connect(
     if room.expires_at < datetime.utcnow():
         raise ValueError("room has expired")
 
-    room_member = db.query(RoomMember).filter(
-        RoomMember.room_id == payload_room_id,
-        RoomMember.user_id == payload_user_id).first()
+    room_member = get_latest_room_member(db, payload_room_id, payload_user_id)
     if room_member is None:
         raise ValueError("room member not found")
 
@@ -567,9 +576,7 @@ async def handler_approve(
         })
         return
 
-    count_active = db.query(RoomMember).filter(
-        RoomMember.room_id == room_id,
-        RoomMember.state == "active").count()
+    count_active = count_current_active_members(db, room_id)
     if room.status != "active":
         await websocket.send_json({
             "type": "error",

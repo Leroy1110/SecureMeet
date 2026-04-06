@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 import secrets
 
+from sqlalchemy import func
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -9,6 +10,76 @@ from app.crypto.rsa import encrypt_room_key
 from app.crypto.symmetric import generate_room_key
 from app.db.models import Room, RoomMember, User
 from app.rooms.schemas import normalize_room_display_name
+
+
+def get_latest_room_member(
+        db: Session,
+        room_id: int,
+        user_id: int) -> RoomMember | None:
+    return (
+        db.query(RoomMember)
+        .filter(
+            RoomMember.room_id == room_id,
+            RoomMember.user_id == user_id,
+        )
+        .order_by(RoomMember.id.desc())
+        .first()
+    )
+
+
+def get_latest_room_members_map(
+        db: Session,
+        room_id: int,
+        user_ids: list[int]) -> dict[int, RoomMember]:
+    normalized_user_ids = list(dict.fromkeys(user_ids))
+    if not normalized_user_ids:
+        return {}
+
+    latest_members_subquery = (
+        db.query(
+            RoomMember.user_id.label("user_id"),
+            func.max(RoomMember.id).label("latest_id"),
+        )
+        .filter(
+            RoomMember.room_id == room_id,
+            RoomMember.user_id.in_(normalized_user_ids),
+        )
+        .group_by(RoomMember.user_id)
+        .subquery()
+    )
+
+    latest_members = (
+        db.query(RoomMember)
+        .join(
+            latest_members_subquery,
+            RoomMember.id == latest_members_subquery.c.latest_id,
+        )
+        .all()
+    )
+
+    return {member.user_id: member for member in latest_members}
+
+
+def count_current_active_members(db: Session, room_id: int) -> int:
+    latest_members_subquery = (
+        db.query(
+            RoomMember.user_id.label("user_id"),
+            func.max(RoomMember.id).label("latest_id"),
+        )
+        .filter(RoomMember.room_id == room_id)
+        .group_by(RoomMember.user_id)
+        .subquery()
+    )
+
+    return (
+        db.query(RoomMember)
+        .join(
+            latest_members_subquery,
+            RoomMember.id == latest_members_subquery.c.latest_id,
+        )
+        .filter(RoomMember.state == "active")
+        .count()
+    )
 
 
 def _resolve_display_name_for_user(
@@ -115,19 +186,14 @@ def join_room(
     if not verify_password(normalized_room_password, room.password_hash):
         raise ValueError("Invalid room password")
 
+    latest_room_member = get_latest_room_member(db, room.id, user_id)
     if (
-        db.query(RoomMember)
-        .filter(
-            RoomMember.room_id == room.id,
-            RoomMember.user_id == user_id,
-            RoomMember.state.in_(["active", "waiting"]),
-        )
-        .first()
+        latest_room_member is not None
+        and latest_room_member.state in {"active", "waiting"}
     ):
         raise ValueError("Already joined")
 
-    count_members = db.query(RoomMember).filter_by(
-        room_id=room.id, state="active").count()
+    count_members = count_current_active_members(db, room.id)
     if count_members >= room.max_participants:
         raise ValueError("Room is full")
 
@@ -179,17 +245,9 @@ def update_room_member_display_name(
     if room is None:
         raise ValueError("Room not found")
 
-    room_member = (
-        db.query(RoomMember)
-        .filter(
-            RoomMember.room_id == room.id,
-            RoomMember.user_id == user_id,
-            RoomMember.state.in_(["waiting", "active"]),
-        )
-        .first()
-    )
+    room_member = get_latest_room_member(db, room.id, user_id)
 
-    if room_member is None:
+    if room_member is None or room_member.state not in {"waiting", "active"}:
         raise ValueError("Room member not found")
 
     room_member.display_name = normalized_display_name
@@ -211,9 +269,7 @@ def update_user_state(
     new_state: str,
     left_at: datetime | None = None,
 ) -> bool:
-    room_member = db.query(RoomMember).filter(
-        RoomMember.room_id == room_id,
-        RoomMember.user_id == user_id).first()
+    room_member = get_latest_room_member(db, room_id, user_id)
 
     if not room_member:
         raise ValueError("RoomMember not found")
@@ -225,7 +281,9 @@ def update_user_state(
         raise ValueError("Invalid state")
 
     room_member.state = new_state
-    if left_at:
+    if new_state == "rejected":
+        room_member.left_at = left_at or datetime.utcnow()
+    elif left_at:
         room_member.left_at = left_at
 
     try:
@@ -240,9 +298,7 @@ def update_user_state(
 
 
 def mark_member_left(db: Session, room_id: int, user_id: int) -> None:
-    room_member = db.query(RoomMember).filter(
-        RoomMember.room_id == room_id,
-        RoomMember.user_id == user_id).first()
+    room_member = get_latest_room_member(db, room_id, user_id)
 
     if room_member is None:
         return
@@ -261,9 +317,7 @@ def mark_member_left(db: Session, room_id: int, user_id: int) -> None:
 
 
 def mark_member_kicked(db: Session, room_id: int, user_id: int) -> None:
-    room_member = db.query(RoomMember).filter(
-        RoomMember.room_id == room_id,
-        RoomMember.user_id == user_id).first()
+    room_member = get_latest_room_member(db, room_id, user_id)
 
     if room_member is None:
         return
