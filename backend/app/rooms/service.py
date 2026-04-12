@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 import secrets
 
-from sqlalchemy import func
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -269,28 +269,43 @@ def update_user_state(
     new_state: str,
     left_at: datetime | None = None,
 ) -> bool:
-    room_member = get_latest_room_member(db, room_id, user_id)
-
-    if not room_member:
-        raise ValueError("RoomMember not found")
-
-    if room_member.state != "waiting":
-        raise ValueError("User is not in waiting state")
-
     if new_state not in ["active", "rejected"]:
         raise ValueError("Invalid state")
 
-    room_member.state = new_state
+    updated_left_at = left_at
     if new_state == "rejected":
-        room_member.left_at = left_at or datetime.utcnow()
-    elif left_at:
-        room_member.left_at = left_at
+        updated_left_at = left_at or datetime.utcnow()
+
+    latest_id_subquery = (
+        select(func.max(RoomMember.id))
+        .where(
+            RoomMember.room_id == room_id,
+            RoomMember.user_id == user_id,
+        )
+        .scalar_subquery()
+    )
 
     try:
-        db.add(room_member)
-        db.commit()
-        db.refresh(room_member)
+        update_result = db.execute(
+            update(RoomMember)
+            .where(
+                RoomMember.id == latest_id_subquery,
+                RoomMember.state == "waiting",
+            )
+            .values(
+                state=new_state,
+                left_at=updated_left_at,
+            )
+        )
 
+        if update_result.rowcount != 1:
+            db.rollback()
+            latest_room_member = get_latest_room_member(db, room_id, user_id)
+            if latest_room_member is None:
+                raise ValueError("RoomMember not found")
+            raise ValueError("User is not in waiting state")
+
+        db.commit()
         return True
     except SQLAlchemyError:
         db.rollback()
@@ -298,38 +313,64 @@ def update_user_state(
 
 
 def mark_member_left(db: Session, room_id: int, user_id: int) -> None:
-    room_member = get_latest_room_member(db, room_id, user_id)
+    latest_id_subquery = (
+        select(func.max(RoomMember.id))
+        .where(
+            RoomMember.room_id == room_id,
+            RoomMember.user_id == user_id,
+        )
+        .scalar_subquery()
+    )
 
-    if room_member is None:
-        return
+    try:
+        update_result = db.execute(
+            update(RoomMember)
+            .where(
+                RoomMember.id == latest_id_subquery,
+                RoomMember.state.notin_(["left", "kicked", "rejected"]),
+            )
+            .values(
+                state="left",
+                left_at=datetime.utcnow(),
+            )
+        )
 
-    if room_member.state not in ["left", "kicked", "rejected"]:
-        room_member.state = "left"
-        room_member.left_at = datetime.utcnow()
-
-        try:
-            db.add(room_member)
+        if update_result.rowcount == 1:
             db.commit()
-            db.refresh(room_member)
-        except SQLAlchemyError:
+        else:
             db.rollback()
-            return
+    except SQLAlchemyError:
+        db.rollback()
+        return
 
 
 def mark_member_kicked(db: Session, room_id: int, user_id: int) -> None:
-    room_member = get_latest_room_member(db, room_id, user_id)
+    latest_id_subquery = (
+        select(func.max(RoomMember.id))
+        .where(
+            RoomMember.room_id == room_id,
+            RoomMember.user_id == user_id,
+        )
+        .scalar_subquery()
+    )
 
-    if room_member is None:
-        return
+    try:
+        update_result = db.execute(
+            update(RoomMember)
+            .where(
+                RoomMember.id == latest_id_subquery,
+                RoomMember.state.notin_(["left", "kicked", "rejected"]),
+            )
+            .values(
+                state="kicked",
+                left_at=datetime.utcnow(),
+            )
+        )
 
-    if room_member.state not in ["left", "kicked", "rejected"]:
-        room_member.state = "kicked"
-        room_member.left_at = datetime.utcnow()
-
-        try:
-            db.add(room_member)
+        if update_result.rowcount == 1:
             db.commit()
-            db.refresh(room_member)
-        except SQLAlchemyError:
+        else:
             db.rollback()
-            return
+    except SQLAlchemyError:
+        db.rollback()
+        return

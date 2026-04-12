@@ -5,19 +5,18 @@ from jose import JWTError
 from app.auth.security import decode_access_token as decode_room_token
 from app.signaling.room_manager import RoomManager, RoomState
 from fastapi.websockets import WebSocketDisconnect
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 from app.db.session import get_db, SessionLocal
 from app.rooms.service import (
     count_current_active_members,
     get_latest_room_member,
     get_latest_room_members_map,
-    mark_member_kicked,
     mark_member_left,
-    update_user_state,
 )
 from datetime import datetime
 from app.rooms.messages_service import save_message
-from app.db.models import Room
+from app.db.models import Room, RoomMember
 from app.logging.audit import log_event
 
 router = APIRouter()
@@ -192,6 +191,145 @@ def _parse_target_user_id(payload: dict) -> int | None:
         return None
 
     return target_user_id
+
+
+def _transition_latest_member_state(
+    db: Session,
+    *,
+    room_id: int,
+    user_id: int,
+    expected_states: set[str],
+    new_state: str,
+    left_at: datetime | None,
+) -> str | None:
+    latest_id_subquery = (
+        select(func.max(RoomMember.id))
+        .where(
+            RoomMember.room_id == room_id,
+            RoomMember.user_id == user_id,
+        )
+        .scalar_subquery()
+    )
+
+    try:
+        update_result = db.execute(
+            update(RoomMember)
+            .where(
+                RoomMember.id == latest_id_subquery,
+                RoomMember.state.in_(expected_states),
+            )
+            .values(
+                state=new_state,
+                left_at=left_at,
+            )
+        )
+        if update_result.rowcount == 1:
+            db.commit()
+            return None
+
+        db.rollback()
+    except Exception:
+        db.rollback()
+        return "db_error"
+
+    room_member = get_latest_room_member(db=db, room_id=room_id, user_id=user_id)
+    if room_member is None:
+        return "missing"
+
+    return "invalid_state"
+
+
+def _restore_latest_member_state(
+    db: Session,
+    *,
+    room_id: int,
+    user_id: int,
+    expected_current_state: str,
+    restored_state: str,
+    restored_left_at: datetime | None,
+) -> bool:
+    latest_id_subquery = (
+        select(func.max(RoomMember.id))
+        .where(
+            RoomMember.room_id == room_id,
+            RoomMember.user_id == user_id,
+        )
+        .scalar_subquery()
+    )
+
+    try:
+        update_result = db.execute(
+            update(RoomMember)
+            .where(
+                RoomMember.id == latest_id_subquery,
+                RoomMember.state == expected_current_state,
+            )
+            .values(
+                state=restored_state,
+                left_at=restored_left_at,
+            )
+        )
+        if update_result.rowcount != 1:
+            db.rollback()
+            return False
+
+        db.commit()
+    except Exception:
+        db.rollback()
+        return False
+
+    return True
+
+
+async def _fail_closed_target_user_recovery(
+    *,
+    db: Session,
+    room_code: str,
+    room_id: int,
+    target_user_id: int,
+    action: str,
+    reason: str,
+) -> None:
+    target_ws: WebSocket | None = None
+    try:
+        target_ws = room_manager.force_reset_user(room_code, target_user_id)
+    except Exception:
+        target_ws = None
+
+    if target_ws is not None:
+        try:
+            await target_ws.send_json({
+                "type": "system.disconnected",
+                "payload": {
+                    "reason": "state resync required"
+                }
+            })
+        except Exception:
+            pass
+
+        try:
+            await target_ws.close(
+                code=status.WS_1011_INTERNAL_ERROR,
+                reason="state resync required",
+            )
+        except Exception:
+            pass
+
+    try:
+        log_event(
+            db=db,
+            event_type="MODERATION_FAIL_CLOSED",
+            room_id=room_id,
+            user_id=target_user_id,
+            data={
+                "room_code": room_code,
+                "action": action,
+                "reason": reason,
+                "severity": "critical",
+            }
+        )
+    except Exception:
+        pass
 
 
 async def _notify_waiting_removed(room_state: RoomState, user_id: int):
@@ -602,24 +740,31 @@ async def handler_approve(
         })
         return
 
-    try:
-        user_status = update_user_state(
-            db=db,
-            room_id=room_id,
-            user_id=payload_user_id,
-            new_state="active"
-        )
-
-    except ValueError as e:
+    transition_error = _transition_latest_member_state(
+        db=db,
+        room_id=room_id,
+        user_id=payload_user_id,
+        expected_states={"waiting"},
+        new_state="active",
+        left_at=None,
+    )
+    if transition_error == "missing":
         await websocket.send_json({
             "type": "error",
             "payload": {
-                "message": str(e)
+                "message": "RoomMember not found"
             }
         })
         return
-
-    except Exception:
+    if transition_error == "invalid_state":
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "User is not in waiting state"
+            }
+        })
+        return
+    if transition_error is not None:
         await websocket.send_json({
             "type": "error",
             "payload": {
@@ -628,69 +773,111 @@ async def handler_approve(
         })
         return
 
-    if user_status:
+    try:
         approval_success, user_approved = room_manager.approve_user(
             room_code=room_code, user_id=payload_user_id)
-
-        if not approval_success:
-            await websocket.send_json({
-                "type": "error",
-                "payload": {
-                    "message": "failed to approve user"
-                }
-            })
-            return
-
-        log_event(
+    except Exception:
+        restored = _restore_latest_member_state(
             db=db,
-            event_type="APPROVE",
             room_id=room_id,
-            user_id=sender_user_id,
-            data={
-                "room_code": room_code,
-                "target_user_id": payload_user_id
-            }
+            user_id=payload_user_id,
+            expected_current_state="active",
+            restored_state="waiting",
+            restored_left_at=None,
         )
-
-        if user_approved is not None:
-            await user_approved.send_json({
-                "type": "waiting.approved",
-                "payload": {}
-            })
-            await user_approved.send_json({
-                "type": "active.list",
-                "payload": {
-                    "room_code": room_code,
-                    "users": build_active_users_payload(db, room_id, room_state)
-                }
-            })
-
+        if not restored:
+            await _fail_closed_target_user_recovery(
+                db=db,
+                room_code=room_code,
+                room_id=room_id,
+                target_user_id=payload_user_id,
+                action="approve",
+                reason="approve_user_exception_and_restore_failed",
+            )
         await websocket.send_json({
-            "type": "waiting.removed",
+            "type": "error",
             "payload": {
-                "user_id": payload_user_id
+                "message": "failed to approve user"
+            }
+        })
+        return
+
+    if not approval_success:
+        restored = _restore_latest_member_state(
+            db=db,
+            room_id=room_id,
+            user_id=payload_user_id,
+            expected_current_state="active",
+            restored_state="waiting",
+            restored_left_at=None,
+        )
+        if not restored:
+            await _fail_closed_target_user_recovery(
+                db=db,
+                room_code=room_code,
+                room_id=room_id,
+                target_user_id=payload_user_id,
+                action="approve",
+                reason="approve_user_unsuccessful_and_restore_failed",
+            )
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "failed to approve user"
+            }
+        })
+        return
+
+    log_event(
+        db=db,
+        event_type="APPROVE",
+        room_id=room_id,
+        user_id=sender_user_id,
+        data={
+            "room_code": room_code,
+            "target_user_id": payload_user_id
+        }
+    )
+
+    if user_approved is not None:
+        await user_approved.send_json({
+            "type": "waiting.approved",
+            "payload": {}
+        })
+        await user_approved.send_json({
+            "type": "active.list",
+            "payload": {
+                "room_code": room_code,
+                "users": build_active_users_payload(db, room_id, room_state)
             }
         })
 
-        message_active_add = {
-            "type": "active.add",
-            "payload": {
-                "user": _serialize_user(db, room_id, payload_user_id)
-            }
+    await websocket.send_json({
+        "type": "waiting.removed",
+        "payload": {
+            "user_id": payload_user_id
         }
+    })
 
-        for user_id, ws_active in room_state.active_ws.items():
-            if user_id != payload_user_id:
-                try:
-                    await ws_active.send_json(message_active_add)
-                except Exception:
-                    pass
+    message_active_add = {
+        "type": "active.add",
+        "payload": {
+            "user": _serialize_user(db, room_id, payload_user_id)
+        }
+    }
 
-        if room_state.host_ws is not None:
+    for user_id, ws_active in room_state.active_ws.items():
+        if user_id != payload_user_id:
             try:
-                await room_state.host_ws.send_json(message_active_add)
+                await ws_active.send_json(message_active_add)
             except Exception:
                 pass
+
+    if room_state.host_ws is not None:
+        try:
+            await room_state.host_ws.send_json(message_active_add)
+        except Exception:
+            pass
 
 
 async def handler_reject(
@@ -730,15 +917,15 @@ async def handler_reject(
         })
         return
 
-    try:
-        user_status = update_user_state(
-            db=db,
-            room_id=room_id,
-            user_id=payload_user_id,
-            new_state="rejected",
-            left_at=datetime.utcnow()
-        )
-    except (RuntimeError, ValueError):
+    transition_error = _transition_latest_member_state(
+        db=db,
+        room_id=room_id,
+        user_id=payload_user_id,
+        expected_states={"waiting"},
+        new_state="rejected",
+        left_at=datetime.utcnow(),
+    )
+    if transition_error is not None:
         await websocket.send_json({
             "type": "error",
             "payload": {
@@ -747,47 +934,89 @@ async def handler_reject(
         })
         return
 
-    if user_status:
+    try:
         rejection_success, user_rejected = room_manager.reject_user(
             room_code=room_code, user_id=payload_user_id)
-
-        if not rejection_success:
-            await websocket.send_json({
-                "type": "error",
-                "payload": {
-                    "message": "failed to reject user"
-                }
-            })
-            return
-
-        log_event(
+    except Exception:
+        restored = _restore_latest_member_state(
             db=db,
-            event_type="REJECT",
             room_id=room_id,
-            user_id=sender_user_id,
-            data={
-                "room_code": room_code,
-                "target_user_id": payload_user_id
-            }
+            user_id=payload_user_id,
+            expected_current_state="rejected",
+            restored_state="waiting",
+            restored_left_at=None,
         )
-
-        if user_rejected is not None:
-            await user_rejected.send_json({
-                "type": "waiting.rejected",
-                "payload": {}
-            })
-
-            await user_rejected.close(
-                code=status.WS_1000_NORMAL_CLOSURE,
-                reason="rejected by host",
+        if not restored:
+            await _fail_closed_target_user_recovery(
+                db=db,
+                room_code=room_code,
+                room_id=room_id,
+                target_user_id=payload_user_id,
+                action="reject",
+                reason="reject_user_exception_and_restore_failed",
             )
-
         await websocket.send_json({
-            "type": "waiting.removed",
+            "type": "error",
             "payload": {
-                "user_id": payload_user_id
+                "message": "failed to reject user"
             }
         })
+        return
+
+    if not rejection_success:
+        restored = _restore_latest_member_state(
+            db=db,
+            room_id=room_id,
+            user_id=payload_user_id,
+            expected_current_state="rejected",
+            restored_state="waiting",
+            restored_left_at=None,
+        )
+        if not restored:
+            await _fail_closed_target_user_recovery(
+                db=db,
+                room_code=room_code,
+                room_id=room_id,
+                target_user_id=payload_user_id,
+                action="reject",
+                reason="reject_user_unsuccessful_and_restore_failed",
+            )
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "failed to reject user"
+            }
+        })
+        return
+
+    log_event(
+        db=db,
+        event_type="REJECT",
+        room_id=room_id,
+        user_id=sender_user_id,
+        data={
+            "room_code": room_code,
+            "target_user_id": payload_user_id
+        }
+    )
+
+    if user_rejected is not None:
+        await user_rejected.send_json({
+            "type": "waiting.rejected",
+            "payload": {}
+        })
+
+        await user_rejected.close(
+            code=status.WS_1000_NORMAL_CLOSURE,
+            reason="rejected by host",
+        )
+
+    await websocket.send_json({
+        "type": "waiting.removed",
+        "payload": {
+            "user_id": payload_user_id
+        }
+    })
 
 
 async def handler_chat_send(
@@ -968,9 +1197,11 @@ async def handler_kick(
         })
         return
 
-    res = room_manager.remove_user_and_get_ws(
-        room_code=room_code, user_id=payload_user_id)
-    if res is None:
+    live_state = room_manager.get_user_live_state(
+        room_code=room_code,
+        user_id=payload_user_id,
+    )
+    if live_state is None:
         await websocket.send_json({
             "type": "error",
             "payload": {
@@ -978,9 +1209,80 @@ async def handler_kick(
             }
         })
         return
-    result_state_ws, result_ws = res
 
-    mark_member_kicked(db=db, room_id=room_id, user_id=payload_user_id)
+    transition_error = _transition_latest_member_state(
+        db=db,
+        room_id=room_id,
+        user_id=payload_user_id,
+        expected_states={"waiting", "active"},
+        new_state="kicked",
+        left_at=datetime.utcnow(),
+    )
+    if transition_error is not None:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "failed to update user state"
+            }
+        })
+        return
+
+    try:
+        res = room_manager.remove_user_and_get_ws(
+            room_code=room_code, user_id=payload_user_id)
+    except Exception:
+        restored = _restore_latest_member_state(
+            db=db,
+            room_id=room_id,
+            user_id=payload_user_id,
+            expected_current_state="kicked",
+            restored_state=live_state,
+            restored_left_at=None,
+        )
+        if not restored:
+            await _fail_closed_target_user_recovery(
+                db=db,
+                room_code=room_code,
+                room_id=room_id,
+                target_user_id=payload_user_id,
+                action="kick",
+                reason="remove_user_exception_and_restore_failed",
+            )
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "failed to kick user"
+            }
+        })
+        return
+
+    if res is None:
+        restored = _restore_latest_member_state(
+            db=db,
+            room_id=room_id,
+            user_id=payload_user_id,
+            expected_current_state="kicked",
+            restored_state=live_state,
+            restored_left_at=None,
+        )
+        if not restored:
+            await _fail_closed_target_user_recovery(
+                db=db,
+                room_code=room_code,
+                room_id=room_id,
+                target_user_id=payload_user_id,
+                action="kick",
+                reason="remove_user_unsuccessful_and_restore_failed",
+            )
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "failed to kick user"
+            }
+        })
+        return
+
+    result_state_ws, result_ws = res
 
     if result_ws is not None:
         try:

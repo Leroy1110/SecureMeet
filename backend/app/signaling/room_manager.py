@@ -200,6 +200,26 @@ class RoomManager:
 
         return pending_disconnect.state == "waiting"
 
+    def get_user_live_state(self, room_code: str, user_id: int) -> str | None:
+        room_state = self.rooms.get(room_code)
+        if room_state is None:
+            return None
+
+        if user_id in room_state.waiting_ws:
+            return "waiting"
+
+        if user_id in room_state.active_ws:
+            return "active"
+
+        pending_disconnect = room_state.pending_disconnects.get(user_id)
+        if pending_disconnect is None:
+            return None
+
+        if pending_disconnect.state in {"waiting", "active"}:
+            return pending_disconnect.state
+
+        return None
+
     def finalize_pending_disconnect(
             self,
             room_code: str,
@@ -338,3 +358,36 @@ class RoomManager:
             return (pending_disconnect.state, None)
 
         return None
+
+    def force_reset_user(self, room_code: str, user_id: int) -> WebSocket | None:
+        room_state = self.rooms.get(room_code)
+        if room_state is None:
+            return None
+
+        ws_remove: WebSocket | None = None
+
+        waiting_ws = room_state.waiting_ws.pop(user_id, None)
+        if waiting_ws is not None:
+            ws_remove = waiting_ws
+
+        active_ws = room_state.active_ws.pop(user_id, None)
+        if active_ws is not None:
+            ws_remove = active_ws
+
+        pending_disconnect = room_state.pending_disconnects.pop(user_id, None)
+        if (
+            pending_disconnect is not None
+            and pending_disconnect.role == "host"
+            and room_state.host_ws is None
+            and room_state.host_user_id == user_id
+        ):
+            room_state.host_user_id = None
+
+        if room_state.host_user_id == user_id:
+            if room_state.host_ws is not None:
+                ws_remove = room_state.host_ws
+                room_state.host_ws = None
+            room_state.host_user_id = None
+
+        self._cleanup_room_if_empty(room_code)
+        return ws_remove
