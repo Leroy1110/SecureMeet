@@ -26,7 +26,9 @@ def test_room_member_rejects_invalid_state(db_session: Session) -> None:
         db_session.commit()
 
 
-def test_room_member_allows_single_live_membership_row(db_session: Session) -> None:
+def test_room_member_allows_single_live_membership_row(
+    db_session: Session,
+) -> None:
     user = create_user(db_session, user_id=1002, username="dupuser")
     room = create_room(db_session, room_code="ROOM-CHECKS-B", host_id=user.id)
 
