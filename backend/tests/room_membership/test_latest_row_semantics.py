@@ -13,10 +13,16 @@ from app.signaling.ws import (
     _resolve_display_names,
     validate_room_for_ws_connect,
 )
-from tests.room_membership.helpers import create_member, create_room, create_user
+from tests.room_membership.helpers import (
+    create_member,
+    create_room,
+    create_user,
+)
 
 
-def test_update_user_state_updates_latest_waiting_row(db_session: Session) -> None:
+def test_update_user_state_updates_latest_waiting_row(
+    db_session: Session,
+) -> None:
     user = create_user(db_session, user_id=1, username="alice")
     room = create_room(db_session, host_id=user.id)
 
@@ -144,7 +150,10 @@ def test_join_room_allows_rejoin_when_latest_row_is_terminal(
 
     latest = (
         db_session.query(RoomMember)
-        .filter(RoomMember.room_id == room.id, RoomMember.user_id == participant.id)
+        .filter(
+            RoomMember.room_id == room.id,
+            RoomMember.user_id == participant.id,
+        )
         .order_by(RoomMember.id.desc())
         .first()
     )
@@ -204,7 +213,9 @@ def test_validate_room_for_ws_connect_uses_latest_row_state(
     assert state == "active"
 
 
-def test_resolve_display_names_uses_latest_membership_rows(db_session: Session) -> None:
+def test_resolve_display_names_uses_latest_membership_rows(
+    db_session: Session,
+) -> None:
     host = create_user(db_session, user_id=40, username="host4")
     participant = create_user(db_session, user_id=41, username="erin")
     room = create_room(db_session, room_code="NAMES", host_id=host.id)
@@ -281,7 +292,11 @@ def test_terminal_latest_row_blocks_stale_transition_updates(
     expected_latest_state: str,
 ) -> None:
     user = create_user(db_session, user_id=51, username="terminal")
-    room = create_room(db_session, room_code="CAS-NOOP-TERMINAL", host_id=user.id)
+    room = create_room(
+        db_session,
+        room_code="CAS-NOOP-TERMINAL",
+        host_id=user.id,
+    )
 
     historical_active = create_member(
         db_session,
