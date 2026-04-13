@@ -107,17 +107,14 @@ class RoomManager:
             self,
             room_code: str,
             ws: WebSocket,
-            user_id: int,
-            role: str) -> str | None:
+            user_id: int) -> str | None:
         if room_code not in self.rooms:
             return None
 
         room_state: RoomState = self.rooms[room_code]
 
-        if role == "host":
-            if ws is room_state.host_ws and user_id == room_state.host_user_id:
-                return "active"
-            return None
+        if ws is room_state.host_ws and user_id == room_state.host_user_id:
+            return "active"
 
         if room_state.waiting_ws.get(user_id) is ws:
             return "waiting"
@@ -153,25 +150,23 @@ class RoomManager:
             room_code: str,
             ws: WebSocket,
             user_id: int,
-            role: str,
-            state: str,
             grace_period_seconds: int) -> PendingDisconnect | None:
         if room_code not in self.rooms:
             return None
 
         room_state: RoomState = self.rooms[room_code]
 
-        if role == "host":
-            if ws is not room_state.host_ws or user_id != room_state.host_user_id:
-                return None
+        if ws is room_state.host_ws and user_id == room_state.host_user_id:
+            role = "host"
+            state = "active"
             room_state.host_ws = None
-        elif state == "waiting":
-            if room_state.waiting_ws.get(user_id) is not ws:
-                return None
+        elif room_state.waiting_ws.get(user_id) is ws:
+            role = "participant"
+            state = "waiting"
             room_state.waiting_ws.pop(user_id, None)
-        elif state == "active":
-            if room_state.active_ws.get(user_id) is not ws:
-                return None
+        elif room_state.active_ws.get(user_id) is ws:
+            role = "participant"
+            state = "active"
             room_state.active_ws.pop(user_id, None)
         else:
             return None

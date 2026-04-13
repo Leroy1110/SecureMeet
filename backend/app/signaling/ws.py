@@ -2036,7 +2036,6 @@ async def websocket_endpoint(
                             room_code=room_code,
                             ws=websocket,
                             user_id=user_id,
-                            role=role,
                         )
                     )
                     if registered_connection_state is None:
@@ -2114,7 +2113,6 @@ async def websocket_endpoint(
                 room_code=room_code,
                 ws=websocket,
                 user_id=user_id,
-                role=role,
             )
             was_waiting = registered_connection_state == "waiting"
             was_active = registered_connection_state == "active"
@@ -2126,8 +2124,6 @@ async def websocket_endpoint(
                 room_code=room_code,
                 ws=websocket,
                 user_id=user_id,
-                role=role,
-                state=registered_connection_state,
                 grace_period_seconds=DISCONNECT_GRACE_PERIOD_SECONDS,
             )
             if pending_disconnect is None:
