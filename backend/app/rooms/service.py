@@ -344,6 +344,70 @@ def mark_member_left(db: Session, room_id: int, user_id: int) -> None:
         return
 
 
+def transfer_host_db(
+    db: Session,
+    room_id: int,
+    old_host_user_id: int,
+    new_host_user_id: int,
+) -> None:
+    latest_old_host_subquery = (
+        select(func.max(RoomMember.id))
+        .where(
+            RoomMember.room_id == room_id,
+            RoomMember.user_id == old_host_user_id,
+        )
+        .scalar_subquery()
+    )
+
+    latest_new_host_subquery = (
+        select(func.max(RoomMember.id))
+        .where(
+            RoomMember.room_id == room_id,
+            RoomMember.user_id == new_host_user_id,
+        )
+        .scalar_subquery()
+    )
+
+    try:
+        db.execute(
+            update(RoomMember)
+            .where(
+                RoomMember.id == latest_old_host_subquery,
+                RoomMember.state == "active",
+            )
+            .values(role="participant")
+        )
+        db.execute(
+            update(RoomMember)
+            .where(
+                RoomMember.id == latest_new_host_subquery,
+                RoomMember.state == "active",
+            )
+            .values(role="host")
+        )
+        db.execute(
+            update(Room)
+            .where(Room.id == room_id)
+            .values(host_id=new_host_user_id)
+        )
+        db.commit()
+    except SQLAlchemyError as error:
+        db.rollback()
+        raise RuntimeError("Failed to transfer host role") from error
+
+
+def mark_room_ended(db: Session, room_id: int) -> None:
+    try:
+        db.execute(
+            update(Room)
+            .where(Room.id == room_id)
+            .values(status="ended")
+        )
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+
+
 def mark_member_kicked(db: Session, room_id: int, user_id: int) -> None:
     latest_id_subquery = (
         select(func.max(RoomMember.id))

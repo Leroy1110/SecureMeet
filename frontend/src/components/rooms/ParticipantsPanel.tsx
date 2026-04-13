@@ -16,14 +16,18 @@ type ParticipantsPanelProps = {
   activeUsers: RoomPresenceUser[];
   localUserId: number | null;
   rtcTargetUserId: number | null;
+  isHost: boolean;
   onSelectRtcTarget: (userId: number) => void;
+  onMakeHost: (userId: number) => void;
 };
 
 const ParticipantsPanel = ({
   activeUsers,
   localUserId,
   rtcTargetUserId,
+  isHost,
   onSelectRtcTarget,
+  onMakeHost,
 }: ParticipantsPanelProps) => {
   if (activeUsers.length === 0) {
     return <p className="text-sm text-slate-600 dark:text-slate-300">No active users yet.</p>;
@@ -37,6 +41,7 @@ const ParticipantsPanel = ({
         const isLocalUser = localUserId !== null && userId === localUserId;
         const canSelect = userId !== null && !isLocalUser;
         const selected = userId !== null && userId === rtcTargetUserId;
+        const canMakeHost = isHost && !isLocalUser && userId !== null;
 
         return (
           <li
@@ -48,19 +53,30 @@ const ParticipantsPanel = ({
                 <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{userLabel}</p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">{isLocalUser ? "You" : "Participant"}</p>
               </div>
-              {canSelect ? (
-                <button
-                  type="button"
-                  onClick={() => onSelectRtcTarget(userId)}
-                  className={`inline-flex h-9 items-center justify-center rounded-lg border px-3 text-xs font-medium transition ${
-                    selected
-                      ? "border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/50 dark:text-blue-300"
-                      : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                  }`}
-                >
-                  {selected ? "Selected" : "Connect"}
-                </button>
-              ) : null}
+              <div className="flex items-center gap-2">
+                {canMakeHost ? (
+                  <button
+                    type="button"
+                    onClick={() => onMakeHost(userId!)}
+                    className="inline-flex h-9 items-center justify-center rounded-lg border border-amber-300 bg-amber-50 px-3 text-xs font-medium text-amber-700 transition hover:bg-amber-100 dark:border-amber-900/40 dark:bg-amber-950/40 dark:text-amber-300 dark:hover:bg-amber-950/60"
+                  >
+                    Make Host
+                  </button>
+                ) : null}
+                {canSelect ? (
+                  <button
+                    type="button"
+                    onClick={() => onSelectRtcTarget(userId!)}
+                    className={`inline-flex h-9 items-center justify-center rounded-lg border px-3 text-xs font-medium transition ${
+                      selected
+                        ? "border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/50 dark:text-blue-300"
+                        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                    }`}
+                  >
+                    {selected ? "Selected" : "Connect"}
+                  </button>
+                ) : null}
+              </div>
             </div>
           </li>
         );
