@@ -2,7 +2,10 @@ import asyncio
 
 from fastapi import APIRouter, WebSocket, status, Depends
 from jose import JWTError
-from app.auth.security import decode_access_token as decode_room_token
+from app.auth.security import (
+    create_room_token,
+    decode_access_token as decode_room_token,
+)
 from app.signaling.room_manager import RoomManager, RoomState
 from fastapi.websockets import WebSocketDisconnect
 from sqlalchemy import func, select, update
@@ -162,7 +165,8 @@ def validate_room_for_ws_connect(
 def _can_send_webrtc_signaling(
     room_state: RoomState, sender_user_id: int, sender_role: str
 ) -> bool:
-    del sender_role  # authorization is based on server-side room_state, not stale local role
+    # authorization is based on server-side room_state, not stale local role
+    del sender_role
     if room_state.host_user_id == sender_user_id and room_state.host_ws is not None:
         return True
     return sender_user_id in room_state.active_ws
@@ -1331,6 +1335,7 @@ async def handler_kick(
         await _broadcast_active_removed(room_state, payload_user_id)
         return
 
+
 async def handler_host_transfer(
     websocket: WebSocket,
     room_state: RoomState,
@@ -1440,7 +1445,6 @@ async def handler_host_transfer(
         new_host_member.display_name if new_host_member else f"User {to_user_id}"
     )
 
-    from app.auth.security import create_room_token
     new_host_token = create_room_token({
         "room_id": room_id,
         "room_code": room_code,
