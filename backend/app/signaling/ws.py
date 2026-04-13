@@ -13,6 +13,8 @@ from app.rooms.service import (
     get_latest_room_member,
     get_latest_room_members_map,
     mark_member_left,
+    mark_room_ended,
+    transfer_host_db,
 )
 from datetime import datetime
 from app.rooms.messages_service import save_message
@@ -160,12 +162,9 @@ def validate_room_for_ws_connect(
 def _can_send_webrtc_signaling(
     room_state: RoomState, sender_user_id: int, sender_role: str
 ) -> bool:
-    if sender_role == "host":
-        return (
-            room_state.host_user_id == sender_user_id
-            and room_state.host_ws is not None
-        )
-
+    del sender_role  # authorization is based on server-side room_state, not stale local role
+    if room_state.host_user_id == sender_user_id and room_state.host_ws is not None:
+        return True
     return sender_user_id in room_state.active_ws
 
 
@@ -427,11 +426,11 @@ async def _finalize_disconnect_after_grace(
     if room_state is None:
         return
 
-    if finalized_disconnect.role == "host":
+    if finalized_disconnect.role == "host" and room_state.host_user_id == user_id:
         await _broadcast_host_removed(room_state, user_id)
     elif finalized_disconnect.state == "waiting":
         await _notify_waiting_removed(room_state, user_id)
-    elif finalized_disconnect.state == "active":
+    else:
         await _broadcast_active_removed(room_state, user_id)
 
 
@@ -677,11 +676,13 @@ async def handler_approve(
     payload: dict,
     db: Session
 ):
-    if sender_role != "host" or room_state.host_user_id != sender_user_id:
-        await websocket.close(
-            code=status.WS_1008_POLICY_VIOLATION,
-            reason="only host can approve or reject",
-        )
+    if room_state.host_user_id != sender_user_id:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "only host can approve or reject"
+            }
+        })
         return
 
     try:
@@ -890,11 +891,13 @@ async def handler_reject(
     payload: dict,
     db: Session
 ):
-    if sender_role != "host" or room_state.host_user_id != sender_user_id:
-        await websocket.close(
-            code=status.WS_1008_POLICY_VIOLATION,
-            reason="only host can approve or reject",
-        )
+    if room_state.host_user_id != sender_user_id:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "only host can approve or reject"
+            }
+        })
         return
 
     try:
@@ -1075,7 +1078,8 @@ async def handler_chat_send(
             })
             return
 
-    if sender_role != "host" and sender_user_id not in room_state.active_ws:
+    is_current_host = room_state.host_user_id == sender_user_id
+    if not is_current_host and sender_user_id not in room_state.active_ws:
         await websocket.send_json({
             "type": "error",
             "payload": {
@@ -1170,11 +1174,13 @@ async def handler_kick(
     payload: dict,
     db: Session
 ):
-    if sender_role != "host" or room_state.host_user_id != sender_user_id:
-        await websocket.close(
-            code=status.WS_1008_POLICY_VIOLATION,
-            reason="only host can kick",
-        )
+    if room_state.host_user_id != sender_user_id:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "only host can kick"
+            }
+        })
         return
 
     try:
@@ -1325,6 +1331,240 @@ async def handler_kick(
         await _broadcast_active_removed(room_state, payload_user_id)
         return
 
+async def handler_host_transfer(
+    websocket: WebSocket,
+    room_state: RoomState,
+    room_code: str,
+    room_id: int,
+    sender_user_id: int,
+    sender_role: str,
+    payload: dict,
+    db: Session
+):
+    if room_state.host_user_id != sender_user_id:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "only host can transfer host role"
+            }
+        })
+        return
+
+    try:
+        to_user_id = int(payload.get("to_user_id"))
+    except (TypeError, ValueError):
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "invalid to_user_id in payload"
+            }
+        })
+        return
+
+    if to_user_id <= 0:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "invalid to_user_id in payload"
+            }
+        })
+        return
+
+    if to_user_id == sender_user_id:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "cannot transfer host to yourself"
+            }
+        })
+        return
+
+    if to_user_id not in room_state.active_ws:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "target user is not an active participant"
+            }
+        })
+        return
+
+    try:
+        transfer_host_db(
+            db=db,
+            room_id=room_id,
+            old_host_user_id=sender_user_id,
+            new_host_user_id=to_user_id,
+        )
+    except Exception:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "failed to persist host transfer"
+            }
+        })
+        return
+
+    transfer_result = room_manager.transfer_host(
+        room_code=room_code,
+        current_host_user_id=sender_user_id,
+        new_host_user_id=to_user_id,
+    )
+    if transfer_result is None:
+        log_event(
+            db=db,
+            event_type="HOST_TRANSFER_MEMSTATE_FAIL",
+            room_id=room_id,
+            user_id=sender_user_id,
+            data={
+                "room_code": room_code,
+                "to_user_id": to_user_id,
+                "severity": "critical",
+            }
+        )
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "host transfer failed after DB update"
+            }
+        })
+        return
+
+    old_host_ws, new_host_ws = transfer_result
+
+    old_host_member = get_latest_room_member(db, room_id, sender_user_id)
+    new_host_member = get_latest_room_member(db, room_id, to_user_id)
+    old_host_display_name = (
+        old_host_member.display_name if old_host_member else f"User {sender_user_id}"
+    )
+    new_host_display_name = (
+        new_host_member.display_name if new_host_member else f"User {to_user_id}"
+    )
+
+    from app.auth.security import create_room_token
+    new_host_token = create_room_token({
+        "room_id": room_id,
+        "room_code": room_code,
+        "user_id": to_user_id,
+        "role": "host",
+        "state": "active",
+        "display_name": new_host_display_name,
+    })
+    old_host_token = create_room_token({
+        "room_id": room_id,
+        "room_code": room_code,
+        "user_id": sender_user_id,
+        "role": "participant",
+        "state": "active",
+        "display_name": old_host_display_name,
+    })
+
+    try:
+        await new_host_ws.send_json({
+            "type": "host.transferred",
+            "payload": {
+                "role": "host",
+                "new_token": new_host_token,
+                "active_users": build_active_users_payload(db, room_id, room_state),
+                "waiting_users": build_waiting_users_payload(db, room_id, room_state),
+            }
+        })
+    except Exception:
+        pass
+
+    try:
+        await old_host_ws.send_json({
+            "type": "host.transferred",
+            "payload": {
+                "role": "participant",
+                "new_token": old_host_token,
+            }
+        })
+    except Exception:
+        pass
+
+    log_event(
+        db=db,
+        event_type="HOST_TRANSFER",
+        room_id=room_id,
+        user_id=sender_user_id,
+        data={
+            "room_code": room_code,
+            "new_host_user_id": to_user_id,
+        }
+    )
+
+
+async def handler_room_end(
+    websocket: WebSocket,
+    room_state: RoomState,
+    room_code: str,
+    room_id: int,
+    sender_user_id: int,
+    sender_role: str,
+    payload: dict,
+    db: Session
+):
+    if room_state.host_user_id != sender_user_id:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "only host can end the meeting"
+            }
+        })
+        return
+
+    try:
+        mark_room_ended(db=db, room_id=room_id)
+    except Exception:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "failed to end meeting"
+            }
+        })
+        return
+
+    all_user_ids = list(dict.fromkeys(
+        room_state.get_active_user_ids() + room_state.get_waiting_user_ids()
+    ))
+    for uid in all_user_ids:
+        try:
+            mark_member_left(db=db, room_id=room_id, user_id=uid)
+        except Exception:
+            pass
+
+    all_connections = room_manager.end_room(room_code)
+
+    end_message = {
+        "type": "room.ended",
+        "payload": {
+            "reason": "host ended the meeting"
+        }
+    }
+    for ws_conn in all_connections:
+        try:
+            await ws_conn.send_json(end_message)
+        except Exception:
+            pass
+        try:
+            await ws_conn.close(
+                code=status.WS_1000_NORMAL_CLOSURE,
+                reason="meeting ended by host",
+            )
+        except Exception:
+            pass
+
+    log_event(
+        db=db,
+        event_type="ROOM_END",
+        room_id=room_id,
+        user_id=sender_user_id,
+        data={
+            "room_code": room_code,
+        }
+    )
+
+
 MESSAGE_HANDLERS = {
     "waiting.approve": handler_approve,
     "waiting.reject": handler_reject,
@@ -1333,6 +1573,8 @@ MESSAGE_HANDLERS = {
     "webrtc.offer": handler_webrtc_offer,
     "webrtc.answer": handler_webrtc_answer,
     "webrtc.ice_candidate": handler_webrtc_ice_candidate,
+    "host.transfer": handler_host_transfer,
+    "room.end": handler_room_end,
 }
 
 
@@ -1827,11 +2069,11 @@ async def websocket_endpoint(
                     except Exception:
                         pass
 
-                    if role == "host":
+                    if role == "host" and room_state.host_user_id == user_id:
                         await _broadcast_host_removed(room_state, user_id)
                     elif registered_connection_state == "waiting":
                         await _notify_waiting_removed(room_state, user_id)
-                    elif registered_connection_state == "active":
+                    else:
                         await _broadcast_active_removed(room_state, user_id)
 
                     await websocket.close(
