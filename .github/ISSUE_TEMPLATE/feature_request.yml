@@ -1,0 +1,58 @@
+name: Feature Request
+description: Propose a feature improvement for SecureMeet.
+title: "[Feature]: "
+labels:
+  - type/feature
+  - status/ready
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: What problem are we trying to solve?
+      placeholder: Describe the user or system pain point.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Solution
+      description: Describe your proposed behavior or UX.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: List alternatives and tradeoffs, if any.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - backend
+        - frontend
+        - full-stack
+        - security
+        - ci
+        - docs
+        - infra
+    validations:
+      required: true
+
+  - type: dropdown
+    id: risk
+    attributes:
+      label: Risk
+      options:
+        - low
+        - medium
+        - high
+      default: 0
+    validations:
+      required: true

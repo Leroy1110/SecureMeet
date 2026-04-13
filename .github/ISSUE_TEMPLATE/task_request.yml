@@ -1,0 +1,77 @@
+name: Task Request
+description: Request an implementation/planning/review task for agents.
+title: "[Task]: "
+labels:
+  - type/refactor
+  - status/ready
+body:
+  - type: dropdown
+    id: agent_owner
+    attributes:
+      label: Suggested Agent Owner
+      options:
+        - Issue Coordinator
+        - Solution Planner
+        - Backend Engineer
+        - Frontend Engineer
+        - Architecture & Review Lead
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - backend
+        - frontend
+        - full-stack
+        - security
+        - ci
+        - docs
+        - infra
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - P0
+        - P1
+        - P2
+        - P3
+      default: 2
+    validations:
+      required: true
+
+  - type: textarea
+    id: task
+    attributes:
+      label: Task Details
+      description: Describe the requested work.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      description: List measurable done criteria.
+      placeholder: |
+        - [ ] Criterion 1
+        - [ ] Criterion 2
+    validations:
+      required: true
+
+  - type: dropdown
+    id: needs_user_reply
+    attributes:
+      label: Needs User Reply now?
+      options:
+        - no
+        - yes
+      default: 0
+    validations:
+      required: true
