@@ -60,15 +60,16 @@ class TestCreateRoomTokenLifecycle:
     def test_host_token_expires_with_room(self, db_session: Session):
         host = create_user(db_session, user_id=1, username="host")
 
-        before = datetime.utcnow()
         room, _password, host_jwt = create_room(db=db_session, host_user_id=host.id)
-        after = datetime.utcnow()
 
         token_exp = decode_expiry(host_jwt)
         room_exp = room.expires_at
 
         # Token expiry should be within tolerance of room expiry
-        assert abs((token_exp - room_exp).total_seconds()) <= self.TOLERANCE.total_seconds()
+        assert (
+            abs((token_exp - room_exp).total_seconds())
+            <= self.TOLERANCE.total_seconds()
+        )
 
     def test_host_token_not_expired_at_issue_time(self, db_session: Session):
         host = create_user(db_session, user_id=2, username="host2")
@@ -86,7 +87,9 @@ class TestCreateRoomTokenLifecycle:
         after = datetime.utcnow()
 
         expected_duration = timedelta(hours=ROOM_DEFAULT_DURATION_HOURS)
-        assert before + expected_duration <= room.expires_at <= after + expected_duration
+        assert (
+            before + expected_duration <= room.expires_at <= after + expected_duration
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +103,10 @@ class TestJoinRoomTokenLifecycle:
         host = create_user(db_session, user_id=10, username="host10")
         participant = create_user(db_session, user_id=11, username="participant11")
 
-        room, room_password, _host_jwt = create_room(db=db_session, host_user_id=host.id)
+        room, room_password, _host_jwt = create_room(
+            db=db_session,
+            host_user_id=host.id,
+        )
 
         participant_jwt = join_room(
             db=db_session,
@@ -119,7 +125,10 @@ class TestJoinRoomTokenLifecycle:
         host = create_user(db_session, user_id=20, username="host20")
         participant = create_user(db_session, user_id=21, username="participant21")
 
-        room, room_password, _host_jwt = create_room(db=db_session, host_user_id=host.id)
+        room, room_password, _host_jwt = create_room(
+            db=db_session,
+            host_user_id=host.id,
+        )
 
         participant_jwt = join_room(
             db=db_session,
@@ -137,7 +146,10 @@ class TestJoinRoomTokenLifecycle:
         host = create_user(db_session, user_id=30, username="host30")
         participant = create_user(db_session, user_id=31, username="participant31")
 
-        room, room_password, _host_jwt = create_room(db=db_session, host_user_id=host.id)
+        room, room_password, _host_jwt = create_room(
+            db=db_session,
+            host_user_id=host.id,
+        )
         room_exp = room.expires_at
 
         participant_jwt = join_room(
