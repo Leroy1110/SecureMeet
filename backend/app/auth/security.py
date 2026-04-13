@@ -38,9 +38,10 @@ def decode_access_token(token: str) -> dict:
         raise JWTError("Invalid token")
 
 
-def create_room_token(data: dict) -> str:
+def create_room_token(data: dict, expires_delta: timedelta | None = None) -> str:
     to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(minutes=JWT_ROOM_TOKEN_EXPIRE_MINUTES)
+    delta = expires_delta if expires_delta is not None else timedelta(minutes=JWT_ROOM_TOKEN_EXPIRE_MINUTES)
+    expire = datetime.utcnow() + delta
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
     return encoded_jwt
