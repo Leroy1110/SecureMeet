@@ -20,7 +20,7 @@ function LandingPageContent() {
   });
 
   return (
-    <div className="min-h-screen bg-white dark:bg-slate-950">
+    <div className="min-h-screen bg-white pt-3 dark:bg-[#020617]">
       <LandingNavbar scrolled={scrolled} />
       <HeroSection />
       <TrustBarSection />
