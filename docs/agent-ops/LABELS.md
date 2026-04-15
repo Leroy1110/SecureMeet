@@ -9,6 +9,7 @@
 - `type/refactor`
 - `type/security`
 - `type/ci`
+- `type/opportunity`
 
 ## Area labels
 
@@ -16,6 +17,14 @@
 - `area/frontend`
 - `area/full-stack`
 - `area/infra`
+
+## Source labels
+
+- `source/nightly`
+
+## Report labels
+
+- `report/morning-summary`
 
 ## Status labels
 
@@ -33,3 +42,4 @@
 
 - Labels are idempotent and safe to re-run.
 - Existing labels with the same name are updated in place.
+- Manual issue intake remains supported; nightly patrol is primary.

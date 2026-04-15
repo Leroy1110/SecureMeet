@@ -2,13 +2,25 @@
 
 This directory contains the foundation for a GitHub-based engineering-agent workflow in SecureMeet.
 
+The primary system goal is nightly patrol plus morning summary. Manual issue intake remains supported as an additional input source.
+
 ## What this setup covers
 
-- Issue triage
-- Planning handoff
-- Implementation ownership
-- Review stage
+- Nightly patrol discovery
+- Morning summary reporting
+- Planning handoff and implementation ownership
+- Review stage and quality gate
 - Waiting-for-user blocking states
+- Manual issue intake as a secondary path
+
+## Target operating cadence
+
+- One nightly patrol run
+- One morning summary run
+- GitHub Project kept in sync
+- Conservative operation (not 24/7 continuous execution)
+- Auto PRs only for small, safe tasks
+- No auto-merge
 
 ## Project and labels bootstrap
 
@@ -35,8 +47,9 @@ gh auth refresh -h github.com -s project,repo
 ## GitHub Project target
 
 - Project name: `SecureMeet Engineering Agents`
-- Lifecycle focus: triage -> planning -> implementation -> review -> done
+- Lifecycle focus: nightly/manual intake -> planning -> implementation -> review -> done
 - Blocking state: `Waiting for User`
+- Source tracking: `Source` field with values `manual`, `nightly`
 
 See [GITHUB_PROJECT_MODEL.md](./GITHUB_PROJECT_MODEL.md) for the full schema.
 
