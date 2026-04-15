@@ -2,19 +2,21 @@
 set -euo pipefail
 
 PROJECT_TITLE="SecureMeet Engineering Agents"
-PROJECT_DESCRIPTION="Project for SecureMeet engineering agent workflow across triage, planning, implementation, review, and waiting-for-user states."
+PROJECT_DESCRIPTION="Project for SecureMeet nightly patrol and morning summary workflow across intake, planning, implementation, review, and waiting-for-user states."
 PROJECT_README=$(cat <<'EOT'
 # SecureMeet Engineering Agents
 
 This project manages SecureMeet engineering delivery across:
 
-- Issue triage
+- Nightly patrol discovery
+- Morning summary reporting
+- Manual issue intake (secondary input)
 - Planning
 - Implementation
 - Review
 - Waiting-for-user blocked work
 
-Use this board as the execution control plane for agent/human collaboration.
+Use this board as the execution control plane for conservative agent/human collaboration (not 24/7 continuous runs).
 EOT
 )
 
@@ -229,6 +231,9 @@ current_fields="$(fields_json)"
 ensure_single_select_field "Area" "backend,frontend,full-stack,security,ci,docs,infra" "$current_fields"
 current_fields="$(fields_json)"
 
+ensure_single_select_field "Source" "manual,nightly" "$current_fields"
+current_fields="$(fields_json)"
+
 ensure_single_select_field "Agent Owner" "Issue Coordinator,Solution Planner,Backend Engineer,Frontend Engineer,Architecture & Review Lead" "$current_fields"
 current_fields="$(fields_json)"
 
@@ -291,7 +296,7 @@ mutation {
     fieldId:"$status_field_id",
     name:"Status",
     singleSelectOptions:[
-      {name:"Inbox", color:GRAY, description:"Newly created and not yet triaged"},
+      {name:"Inbox", color:GRAY, description:"Newly captured from nightly patrol or manual intake"},
       {name:"Ready", color:BLUE, description:"Triaged and ready for planning or implementation"},
       {name:"In Progress", color:YELLOW, description:"Actively being worked"},
       {name:"Waiting for User", color:ORANGE, description:"Blocked pending user feedback"},
