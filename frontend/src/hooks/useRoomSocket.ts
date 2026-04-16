@@ -7,14 +7,14 @@ import {
   pickString,
   readString,
 } from "../lib/roomMessageParsers";
-import { clearRoomSessionToken, getRoomSessionToken, isRoomTokenExpired, readUserIdFromToken } from "../lib/roomSession";
+import { clearRoomSessionToken, getRoomSessionToken, readUserIdFromToken, setRoomSessionToken, isRoomTokenExpired } from "../lib/roomSession";
 import { buildRoomSocketUrl } from "../lib/roomSocket";
 
 export type ConnectionStatus = "connecting" | "open" | "connected" | "closed" | "error";
 export type SessionStatus = "unknown" | "waiting" | "active" | "rejected" | "kicked" | "disconnected" | "error";
 export type HostMemberActionType = "waiting.approve" | "waiting.reject" | "member.kick";
 export type WebRtcMessageType = "webrtc.offer" | "webrtc.answer" | "webrtc.ice_candidate";
-export type OutgoingMessageType = HostMemberActionType | "chat.send" | WebRtcMessageType | "room.leave";
+export type OutgoingMessageType = HostMemberActionType | "chat.send" | WebRtcMessageType | "room.leave" | "host.transfer" | "room.end";
 type PendingHostActionTargetScope = "waiting" | "active" | "either";
 type PendingHostAction = {
   type: HostMemberActionType;
@@ -93,6 +93,8 @@ export type UseRoomSocketResult = {
   setSelectedRecipientFromValue: (value: string) => void;
   sendHostWaitingAction: (messageType: "waiting.approve" | "waiting.reject", userId: number | null) => void;
   sendHostKickAction: (userId: number | null) => void;
+  sendHostTransfer: (toUserId: number) => boolean;
+  sendEndMeeting: () => boolean;
   sendChatMessage: (event: FormEvent<HTMLFormElement>) => void;
   sendWebRtcOffer: (toUserId: number | null, sdp: string) => boolean;
   sendWebRtcAnswer: (toUserId: number | null, sdp: string) => boolean;
@@ -563,6 +565,51 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
   const sendHostKickAction = (userId: number | null) => {
     sendHostMemberAction("member.kick", userId);
   };
+
+  const sendHostTransfer = useCallback((toUserId: number): boolean => {
+    if (role !== "host") {
+      return false;
+    }
+
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+
+    try {
+      lastOutgoingMessageTypeRef.current = "host.transfer";
+      socket.send(
+        JSON.stringify({
+          type: "host.transfer",
+          payload: { to_user_id: toUserId },
+        })
+      );
+      return true;
+    } catch {
+      lastOutgoingMessageTypeRef.current = null;
+      return false;
+    }
+  }, [role]);
+
+  const sendEndMeeting = useCallback((): boolean => {
+    if (role !== "host") {
+      return false;
+    }
+
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+
+    try {
+      lastOutgoingMessageTypeRef.current = "room.end";
+      socket.send(JSON.stringify({ type: "room.end", payload: {} }));
+      return true;
+    } catch {
+      lastOutgoingMessageTypeRef.current = null;
+      return false;
+    }
+  }, [role]);
 
   const canSendChat = sessionStatus === "active" || role === "host";
   const canSendWebRtc = sessionStatus === "active" || role === "host";
@@ -1155,6 +1202,46 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
           socket.close();
           break;
         }
+        case "host.transferred": {
+          if (!isJsonRecord(payloadValue)) {
+            break;
+          }
+          const newToken = pickString(payloadValue, ["new_token", "newToken"]);
+          const newRole = pickString(payloadValue, ["role"]);
+
+          if (newToken) {
+            setRoomSessionToken(newToken);
+            setRoomToken(newToken);
+          }
+
+          if (newRole) {
+            setRole(newRole);
+          }
+
+          if (newRole === "host") {
+            const active = resolveList(payloadValue, ["active_users", "active"]);
+            const waiting = resolveList(payloadValue, ["waiting_users", "waiting"]);
+            setActiveUsers(active);
+            setWaitingUsers(waiting);
+          }
+          break;
+        }
+        case "room.ended": {
+          lastOutgoingMessageTypeRef.current = null;
+          suppressReconnectRef.current = true;
+          clearReconnectTimeout();
+          reconnectWindowStartedAtRef.current = null;
+          clearPersistedRoomSession();
+          const endReason = isJsonRecord(payloadValue)
+            ? pickString(payloadValue, ["reason", "message", "detail"])
+            : "";
+          setSessionStatus("disconnected");
+          setRoomState("disconnected");
+          setConnectionStatus("closed");
+          setLastError(endReason || "The meeting was ended by the host.");
+          socket.close();
+          break;
+        }
         case "chat.message": {
           if (!isJsonRecord(payloadValue)) {
             break;
@@ -1336,6 +1423,8 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
     setSelectedRecipientFromValue,
     sendHostWaitingAction,
     sendHostKickAction,
+    sendHostTransfer,
+    sendEndMeeting,
     sendChatMessage,
     sendWebRtcOffer,
     sendWebRtcAnswer,

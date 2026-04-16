@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import BottomControls from "../components/rooms/BottomControls";
 import ChatPanel from "../components/rooms/ChatPanel";
+import HostLeaveDialog from "../components/rooms/HostLeaveDialog";
 import MeetingStage from "../components/rooms/MeetingStage";
 import ParticipantsPanel from "../components/rooms/ParticipantsPanel";
 import RoomDrawer from "../components/rooms/RoomDrawer";
@@ -102,7 +103,9 @@ function RoomPage() {
     consumeWebRtcSignal,
     sendChatMessage,
     sendHostKickAction,
+    sendHostTransfer,
     sendHostWaitingAction,
+    sendEndMeeting,
     sendWebRtcAnswer,
     sendWebRtcIceCandidate,
     sendWebRtcOffer,
@@ -134,6 +137,8 @@ function RoomPage() {
   const [rtcTargetUserId, setRtcTargetUserId] = useState<number | null>(null);
   const [activePanel, setActivePanel] = useState<PanelKey | null>(null);
   const [isDebugOpen, setIsDebugOpen] = useState(false);
+  const [isHostLeaveDialogOpen, setIsHostLeaveDialogOpen] = useState(false);
+  const pendingLeaveAfterTransferRef = useRef(false);
 
   const {
     localStream,
@@ -417,13 +422,39 @@ function RoomPage() {
     [availableRtcTargetUserIds, localUserId, rtcTargetUserId]
   );
 
-  const handleLeaveRoom = useCallback(() => {
+  const doLeaveRoom = useCallback(() => {
     resetRtcFlowState();
     closePeerConnection();
     stopLocalMedia();
     leaveRoom();
     navigate("/dashboard", { replace: true });
   }, [closePeerConnection, leaveRoom, navigate, resetRtcFlowState, stopLocalMedia]);
+
+  const handleLeaveRoom = useCallback(() => {
+    if (isHost && !isFinalState) {
+      setIsHostLeaveDialogOpen(true);
+      return;
+    }
+    doLeaveRoom();
+  }, [doLeaveRoom, isFinalState, isHost]);
+
+  const handleTransferAndLeave = useCallback((toUserId: number) => {
+    setIsHostLeaveDialogOpen(false);
+    sendHostTransfer(toUserId);
+    pendingLeaveAfterTransferRef.current = true;
+  }, [sendHostTransfer]);
+
+  const handleEndMeeting = useCallback(() => {
+    setIsHostLeaveDialogOpen(false);
+    resetRtcFlowState();
+    closePeerConnection();
+    stopLocalMedia();
+    sendEndMeeting();
+  }, [closePeerConnection, resetRtcFlowState, sendEndMeeting, stopLocalMedia]);
+
+  const handleMakeHost = useCallback((userId: number) => {
+    sendHostTransfer(userId);
+  }, [sendHostTransfer]);
 
   const handleSelectRtcTarget = useCallback(
     (targetUserId: number) => {
@@ -483,6 +514,13 @@ function RoomPage() {
       setActivePanel(null);
     }
   }, [activePanel, isFinalState]);
+
+  useEffect(() => {
+    if (pendingLeaveAfterTransferRef.current && !isHost) {
+      pendingLeaveAfterTransferRef.current = false;
+      doLeaveRoom();
+    }
+  }, [doLeaveRoom, isHost]);
 
   useEffect(() => {
     return () => {
@@ -893,7 +931,9 @@ function RoomPage() {
           activeUsers={activeUsers}
           localUserId={localUserId}
           rtcTargetUserId={rtcTargetUserId}
+          isHost={isHost}
           onSelectRtcTarget={handleSelectRtcTarget}
+          onMakeHost={handleMakeHost}
         />
       </RoomDrawer>
 
@@ -960,6 +1000,15 @@ function RoomPage() {
           onSubmit={sendChatMessage}
         />
       </RoomDrawer>
+
+      <HostLeaveDialog
+        isOpen={isHostLeaveDialogOpen}
+        activeUsers={activeUsers}
+        localUserId={localUserId}
+        onTransferAndLeave={handleTransferAndLeave}
+        onEndMeeting={handleEndMeeting}
+        onCancel={() => setIsHostLeaveDialogOpen(false)}
+      />
     </div>
   );
 }

@@ -107,17 +107,14 @@ class RoomManager:
             self,
             room_code: str,
             ws: WebSocket,
-            user_id: int,
-            role: str) -> str | None:
+            user_id: int) -> str | None:
         if room_code not in self.rooms:
             return None
 
         room_state: RoomState = self.rooms[room_code]
 
-        if role == "host":
-            if ws is room_state.host_ws and user_id == room_state.host_user_id:
-                return "active"
-            return None
+        if ws is room_state.host_ws and user_id == room_state.host_user_id:
+            return "active"
 
         if room_state.waiting_ws.get(user_id) is ws:
             return "waiting"
@@ -153,25 +150,23 @@ class RoomManager:
             room_code: str,
             ws: WebSocket,
             user_id: int,
-            role: str,
-            state: str,
             grace_period_seconds: int) -> PendingDisconnect | None:
         if room_code not in self.rooms:
             return None
 
         room_state: RoomState = self.rooms[room_code]
 
-        if role == "host":
-            if ws is not room_state.host_ws or user_id != room_state.host_user_id:
-                return None
+        if ws is room_state.host_ws and user_id == room_state.host_user_id:
+            role = "host"
+            state = "active"
             room_state.host_ws = None
-        elif state == "waiting":
-            if room_state.waiting_ws.get(user_id) is not ws:
-                return None
+        elif room_state.waiting_ws.get(user_id) is ws:
+            role = "participant"
+            state = "waiting"
             room_state.waiting_ws.pop(user_id, None)
-        elif state == "active":
-            if room_state.active_ws.get(user_id) is not ws:
-                return None
+        elif room_state.active_ws.get(user_id) is ws:
+            role = "participant"
+            state = "active"
             room_state.active_ws.pop(user_id, None)
         else:
             return None
@@ -358,6 +353,58 @@ class RoomManager:
             return (pending_disconnect.state, None)
 
         return None
+
+    def transfer_host(
+            self,
+            room_code: str,
+            current_host_user_id: int,
+            new_host_user_id: int) -> tuple[WebSocket, WebSocket] | None:
+        room_state = self.rooms.get(room_code)
+        if room_state is None:
+            return None
+
+        if room_state.host_user_id != current_host_user_id:
+            return None
+
+        if room_state.host_ws is None:
+            return None
+
+        new_host_ws = room_state.active_ws.get(new_host_user_id)
+        if new_host_ws is None:
+            return None
+
+        old_host_ws = room_state.host_ws
+
+        room_state.host_ws = new_host_ws
+        room_state.host_user_id = new_host_user_id
+        room_state.active_ws.pop(new_host_user_id)
+        room_state.active_ws[current_host_user_id] = old_host_ws
+
+        return (old_host_ws, new_host_ws)
+
+    def get_all_connections(self, room_code: str) -> list[WebSocket]:
+        room_state = self.rooms.get(room_code)
+        if room_state is None:
+            return []
+
+        connections: list[WebSocket] = []
+        if room_state.host_ws is not None:
+            connections.append(room_state.host_ws)
+        connections.extend(room_state.active_ws.values())
+        connections.extend(room_state.waiting_ws.values())
+        return connections
+
+    def end_room(self, room_code: str) -> list[WebSocket]:
+        connections = self.get_all_connections(room_code)
+        room_state = self.rooms.get(room_code)
+        if room_state is not None:
+            room_state.host_ws = None
+            room_state.host_user_id = None
+            room_state.active_ws.clear()
+            room_state.waiting_ws.clear()
+            room_state.pending_disconnects.clear()
+        self.rooms.pop(room_code, None)
+        return connections
 
     def force_reset_user(self, room_code: str, user_id: int) -> WebSocket | None:
         room_state = self.rooms.get(room_code)
