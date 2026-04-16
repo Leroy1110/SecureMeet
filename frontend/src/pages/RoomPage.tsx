@@ -385,7 +385,13 @@ function RoomPage() {
   useEffect(() => {
     if (!canSendWebRtc || !isSocketOpen || isFinalState || localUserId === null) {
       pendingOfferInitiationsRef.current.clear();
-      closeAllPeerConnections();
+      // Only close connections when there are entries to close; unconditional
+      // closeAllPeerConnections() always publishes a new Map reference which
+      // re-triggers this effect (peerStates dep), creating a render loop while
+      // the room is in a non-RTC state.
+      if (peerStates.size > 0) {
+        closeAllPeerConnections();
+      }
       return;
     }
 
@@ -411,8 +417,27 @@ function RoomPage() {
         continue;
       }
 
-      if (peerStates.has(targetUserId) || pendingOfferInitiationsRef.current.has(targetUserId)) {
+      if (pendingOfferInitiationsRef.current.has(targetUserId)) {
         continue;
+      }
+
+      // A failed or closed entry is stale — the peer may have reconnected.
+      // Close it so createPeerConnectionForUser creates a fresh connection and
+      // the offer flags are reset. Disconnected is transient and self-recovers
+      // via ICE, so leave it alone.
+      const existingSnapshot = peerStates.get(targetUserId);
+      const isStale =
+        existingSnapshot !== undefined &&
+        (existingSnapshot.connectionState === "failed" ||
+          existingSnapshot.connectionState === "closed");
+
+      if (existingSnapshot && !isStale) {
+        // Healthy entry (new / connecting / connected / disconnected) — skip.
+        continue;
+      }
+
+      if (isStale) {
+        closePeerConnectionForUser(targetUserId);
       }
 
       const peerConnection = createPeerConnectionForUser(
