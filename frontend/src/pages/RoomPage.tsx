@@ -421,18 +421,19 @@ function RoomPage() {
         continue;
       }
 
-      // A failed or closed entry is stale — the peer may have reconnected.
-      // Close it so createPeerConnectionForUser creates a fresh connection and
-      // the offer flags are reset. Disconnected is transient and self-recovers
-      // via ICE, so leave it alone.
+      // Failed/closed/disconnected entries are stale for this initiator loop.
+      // Same-user reconnects often leave a previous connection in
+      // "disconnected", and with lower-ID-initiates we can otherwise miss
+      // renegotiation for an extended period.
       const existingSnapshot = peerStates.get(targetUserId);
       const isStale =
         existingSnapshot !== undefined &&
         (existingSnapshot.connectionState === "failed" ||
-          existingSnapshot.connectionState === "closed");
+          existingSnapshot.connectionState === "closed" ||
+          existingSnapshot.connectionState === "disconnected");
 
       if (existingSnapshot && !isStale) {
-        // Healthy entry (new / connecting / connected / disconnected) — skip.
+        // Healthy entry (new / connecting / connected) — skip.
         continue;
       }
 
