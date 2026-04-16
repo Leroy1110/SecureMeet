@@ -6,6 +6,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.auth.security import create_room_token, hash_password, verify_password
+from app.config import ROOM_DEFAULT_DURATION_HOURS
 from app.crypto.rsa import encrypt_room_key
 from app.crypto.symmetric import generate_room_key
 from app.db.models import Room, RoomMember, User
@@ -109,7 +110,7 @@ def create_room(
     room_key = generate_room_key()
     encrypted_room_key = encrypt_room_key(room_key)
 
-    expires_at = datetime.utcnow() + timedelta(hours=2)
+    expires_at = datetime.utcnow() + timedelta(hours=ROOM_DEFAULT_DURATION_HOURS)
 
     new_room = Room(
         room_code=room_code,
@@ -154,7 +155,8 @@ def create_room(
                 "role": "host",
                 "state": "active",
                 "display_name": host_member.display_name,
-            }
+            },
+            expires_delta=expires_at - datetime.utcnow(),
         )
 
         return (new_room, room_password, host_room_jwt)
@@ -221,7 +223,8 @@ def join_room(
                 "role": room_member.role,
                 "state": room_member.state,
                 "display_name": room_member.display_name,
-            }
+            },
+            expires_delta=room.expires_at - datetime.utcnow(),
         )
 
         return room_token_data

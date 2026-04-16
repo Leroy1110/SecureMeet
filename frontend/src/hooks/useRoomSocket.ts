@@ -7,7 +7,7 @@ import {
   pickString,
   readString,
 } from "../lib/roomMessageParsers";
-import { clearRoomSessionToken, getRoomSessionToken, readUserIdFromToken, setRoomSessionToken } from "../lib/roomSession";
+import { clearRoomSessionToken, getRoomSessionToken, readUserIdFromToken, setRoomSessionToken, isRoomTokenExpired } from "../lib/roomSession";
 import { buildRoomSocketUrl } from "../lib/roomSocket";
 
 export type ConnectionStatus = "connecting" | "open" | "connected" | "closed" | "error";
@@ -466,6 +466,10 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
   const socketConfig = useMemo(() => {
     if (!hasPrerequisites) {
       return { url: "", error: "" };
+    }
+
+    if (isRoomTokenExpired(roomToken)) {
+      return { url: "", error: "Your session has expired. Please rejoin the room to continue." };
     }
 
     return buildRoomSocketUrl(normalizedRoomCode, roomToken);
@@ -952,7 +956,11 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
         reconnectWindowStartedAtRef.current = null;
         clearPersistedRoomSession();
         setSessionStatus("error");
-        setLastError(closeReason);
+        const normalizedCloseReason = closeReason.toLowerCase();
+        const userMessage = normalizedCloseReason.includes("unable to decode token")
+          ? "Your session has expired. Please rejoin the room to continue."
+          : closeReason;
+        setLastError(userMessage);
         setConnectionStatus("error");
         return;
       }
