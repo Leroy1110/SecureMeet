@@ -32,7 +32,6 @@ type PeerEntry = {
   hasReceivedRemoteMedia: boolean;
   fallbackRemoteStream: MediaStream | null;
   disconnectErrorTimeout: number | null;
-  pendingRemoteIceCandidates: RTCIceCandidateInit[];
   hasInitiatedOffer: boolean;
   isAwaitingAnswer: boolean;
 };
@@ -87,6 +86,7 @@ const snapshotFromEntry = (entry: PeerEntry): PeerConnectionSnapshot => ({
 
 export const useWebRtcPeers = (): UseWebRtcPeersResult => {
   const peersRef = useRef<Map<number, PeerEntry>>(new Map());
+  const pendingRemoteIceCandidatesRef = useRef<Map<number, RTCIceCandidateInit[]>>(new Map());
   const [peerStates, setPeerStates] = useState<Map<number, PeerConnectionSnapshot>>(new Map());
 
   const publishPeerStates = useCallback(() => {
@@ -131,6 +131,7 @@ export const useWebRtcPeers = (): UseWebRtcPeersResult => {
 
       teardownPeerEntry(entry);
       peersRef.current.delete(userId);
+      pendingRemoteIceCandidatesRef.current.delete(userId);
       publishPeerStates();
     },
     [publishPeerStates, teardownPeerEntry]
@@ -141,6 +142,7 @@ export const useWebRtcPeers = (): UseWebRtcPeersResult => {
       teardownPeerEntry(entry);
     }
     peersRef.current.clear();
+    pendingRemoteIceCandidatesRef.current.clear();
     publishPeerStates();
   }, [publishPeerStates, teardownPeerEntry]);
 
@@ -171,26 +173,10 @@ export const useWebRtcPeers = (): UseWebRtcPeersResult => {
       try {
         nextPeerConnection = new RTCPeerConnection({ iceServers: DEFAULT_ICE_SERVERS });
       } catch (error) {
-        const errorMessage = toRtcErrorMessage(error, "Failed to create WebRTC peer connection.");
-        const placeholderEntry: PeerEntry = {
-          peerConnection: new RTCPeerConnection(),
-          remoteStream: null,
-          connectionState: "failed",
-          error: errorMessage,
-          hasReceivedRemoteMedia: false,
-          fallbackRemoteStream: null,
-          disconnectErrorTimeout: null,
-          pendingRemoteIceCandidates: [],
-          hasInitiatedOffer: false,
-          isAwaitingAnswer: false,
-        };
-        try {
-          placeholderEntry.peerConnection.close();
-        } catch {
-          // ignore
-        }
-        peersRef.current.set(userId, placeholderEntry);
-        publishPeerStates();
+        console.error("Failed to construct RTCPeerConnection.", {
+          userId,
+          error: toRtcErrorMessage(error, "Failed to create WebRTC peer connection."),
+        });
         return null;
       }
 
@@ -202,7 +188,6 @@ export const useWebRtcPeers = (): UseWebRtcPeersResult => {
         hasReceivedRemoteMedia: false,
         fallbackRemoteStream: null,
         disconnectErrorTimeout: null,
-        pendingRemoteIceCandidates: [],
         hasInitiatedOffer: false,
         isAwaitingAnswer: false,
       };
@@ -339,23 +324,23 @@ export const useWebRtcPeers = (): UseWebRtcPeersResult => {
 
   const recordRemoteIceCandidate = useCallback(
     (userId: number, candidate: RTCIceCandidateInit) => {
-      const entry = peersRef.current.get(userId);
-      if (!entry) {
+      const existing = pendingRemoteIceCandidatesRef.current.get(userId);
+      if (existing) {
+        existing.push(candidate);
         return;
       }
-      entry.pendingRemoteIceCandidates.push(candidate);
+      pendingRemoteIceCandidatesRef.current.set(userId, [candidate]);
     },
     []
   );
 
   const consumePendingRemoteIceCandidates = useCallback(
     (userId: number): RTCIceCandidateInit[] => {
-      const entry = peersRef.current.get(userId);
-      if (!entry) {
+      const pending = pendingRemoteIceCandidatesRef.current.get(userId);
+      if (!pending) {
         return [];
       }
-      const pending = entry.pendingRemoteIceCandidates;
-      entry.pendingRemoteIceCandidates = [];
+      pendingRemoteIceCandidatesRef.current.delete(userId);
       return pending;
     },
     []
