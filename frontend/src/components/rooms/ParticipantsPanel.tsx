@@ -1,4 +1,5 @@
 import { type RoomPresenceUser } from "../../hooks/useRoomSocket";
+import type { PeerConnectionSnapshot } from "../../hooks/useWebRtcPeers";
 
 const getPresenceUserLabel = (user: RoomPresenceUser): string => {
   if (user.label.trim()) {
@@ -15,16 +16,56 @@ const getPresenceUserLabel = (user: RoomPresenceUser): string => {
 type ParticipantsPanelProps = {
   activeUsers: RoomPresenceUser[];
   localUserId: number | null;
-  rtcTargetUserId: number | null;
-  onSelectRtcTarget: (userId: number) => void;
+  peerStates: Map<number, PeerConnectionSnapshot>;
 };
 
-const ParticipantsPanel = ({
-  activeUsers,
-  localUserId,
-  rtcTargetUserId,
-  onSelectRtcTarget,
-}: ParticipantsPanelProps) => {
+const statusLabelForSnapshot = (snapshot: PeerConnectionSnapshot | undefined): string => {
+  if (!snapshot) {
+    return "Not connected";
+  }
+
+  if (snapshot.error) {
+    return "Error";
+  }
+
+  switch (snapshot.connectionState) {
+    case "connected":
+      return "Connected";
+    case "connecting":
+    case "new":
+      return "Connecting";
+    case "disconnected":
+      return "Disconnected";
+    case "failed":
+      return "Failed";
+    case "closed":
+      return "Closed";
+    default:
+      return "Connecting";
+  }
+};
+
+const statusBadgeClass = (snapshot: PeerConnectionSnapshot | undefined): string => {
+  if (!snapshot || snapshot.connectionState === "closed" || snapshot.connectionState === "new") {
+    return "border-slate-300 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200";
+  }
+
+  if (snapshot.error || snapshot.connectionState === "failed") {
+    return "border-red-300 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-950/50 dark:text-red-300";
+  }
+
+  if (snapshot.connectionState === "connected") {
+    return "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-300";
+  }
+
+  if (snapshot.connectionState === "disconnected") {
+    return "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300";
+  }
+
+  return "border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/50 dark:text-blue-300";
+};
+
+const ParticipantsPanel = ({ activeUsers, localUserId, peerStates }: ParticipantsPanelProps) => {
   if (activeUsers.length === 0) {
     return <p className="text-sm text-slate-600 dark:text-slate-300">No active users yet.</p>;
   }
@@ -35,8 +76,7 @@ const ParticipantsPanel = ({
         const userLabel = getPresenceUserLabel(user);
         const userId = user.userId;
         const isLocalUser = localUserId !== null && userId === localUserId;
-        const canSelect = userId !== null && !isLocalUser;
-        const selected = userId !== null && userId === rtcTargetUserId;
+        const snapshot = userId !== null && !isLocalUser ? peerStates.get(userId) : undefined;
 
         return (
           <li
@@ -48,18 +88,12 @@ const ParticipantsPanel = ({
                 <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{userLabel}</p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">{isLocalUser ? "You" : "Participant"}</p>
               </div>
-              {canSelect ? (
-                <button
-                  type="button"
-                  onClick={() => onSelectRtcTarget(userId)}
-                  className={`inline-flex h-9 items-center justify-center rounded-lg border px-3 text-xs font-medium transition ${
-                    selected
-                      ? "border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/50 dark:text-blue-300"
-                      : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                  }`}
+              {!isLocalUser && userId !== null ? (
+                <span
+                  className={`inline-flex h-9 items-center justify-center rounded-lg border px-3 text-xs font-medium ${statusBadgeClass(snapshot)}`}
                 >
-                  {selected ? "Selected" : "Connect"}
-                </button>
+                  {statusLabelForSnapshot(snapshot)}
+                </span>
               ) : null}
             </div>
           </li>

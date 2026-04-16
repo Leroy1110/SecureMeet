@@ -1710,6 +1710,31 @@ async def websocket_endpoint(
                     "users": build_active_users_payload(db, room_id, room_state)
                 }
             })
+
+            # Broadcast active.add to other active users and host so existing
+            # peers can initiate WebRTC negotiation with the (re)connecting
+            # participant in a mesh topology.
+            message_active_add = {
+                "type": "active.add",
+                "payload": {
+                    "user": _serialize_user(db, room_id, user_id)
+                }
+            }
+            for other_user_id, ws_active in room_state.active_ws.items():
+                if other_user_id != user_id:
+                    try:
+                        await ws_active.send_json(message_active_add)
+                    except Exception:
+                        pass
+            if (
+                room_state.host_ws is not None
+                and room_state.host_user_id is not None
+                and room_state.host_user_id != user_id
+            ):
+                try:
+                    await room_state.host_ws.send_json(message_active_add)
+                except Exception:
+                    pass
         else:
             await websocket.close(
                 code=status.WS_1008_POLICY_VIOLATION,
