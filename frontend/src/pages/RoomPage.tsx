@@ -7,11 +7,12 @@ import MeetingStage from "../components/rooms/MeetingStage";
 import ParticipantsPanel from "../components/rooms/ParticipantsPanel";
 import RoomDrawer from "../components/rooms/RoomDrawer";
 import RoomHeader from "../components/rooms/RoomHeader";
-import type { LocalMediaUiState, RemoteUiState, RtcUiState } from "../components/rooms/types";
+import type { LocalMediaUiState, MeshUiState } from "../components/rooms/types";
 import WaitingPanel from "../components/rooms/WaitingPanel";
 import { useLocalMedia } from "../hooks/useLocalMedia";
 import { type QueuedWebRtcSignal, type SessionStatus, useRoomSocket } from "../hooks/useRoomSocket";
-import { useWebRtcPeer } from "../hooks/useWebRtcPeer";
+import { useWebRtcPeers } from "../hooks/useWebRtcPeers";
+import { ROOM_MEDIA_TOPOLOGY } from "../lib/mediaTopology";
 import { getRoomEntryPreferences } from "../lib/roomEntryPreferences";
 
 const getSessionStateContent = (status: SessionStatus): { title: string; description: string } => {
@@ -127,14 +128,10 @@ function RoomPage() {
   const shouldStartLocalMedia = role === "host" || sessionStatus === "active";
   const preferencesMediaDisabled = !audioEnabled && !videoEnabled;
 
-  const activeRtcPeerUserIdRef = useRef<number | null>(null);
-  const pendingRemoteIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
-  const hasInitiatedOfferRef = useRef(false);
-  const isAwaitingAnswerRef = useRef(false);
-  const isProcessingQueuedSignalRef = useRef(false);
+  const processingSignalPeersRef = useRef<Set<number>>(new Set());
+  const pendingOfferInitiationsRef = useRef<Set<number>>(new Set());
 
   const [rtcFlowError, setRtcFlowError] = useState("");
-  const [rtcTargetUserId, setRtcTargetUserId] = useState<number | null>(null);
   const [activePanel, setActivePanel] = useState<PanelKey | null>(null);
   const [isDebugOpen, setIsDebugOpen] = useState(false);
   const [isHostLeaveDialogOpen, setIsHostLeaveDialogOpen] = useState(false);
@@ -151,19 +148,21 @@ function RoomPage() {
   } = useLocalMedia();
 
   const {
-    remoteStream,
-    rtcError,
-    rtcConnectionState,
-    createPeerConnection,
-    closePeerConnection,
-  } = useWebRtcPeer();
+    peerStates,
+    createPeerConnectionForUser,
+    closePeerConnectionForUser,
+    closeAllPeerConnections,
+    getPeerConnection,
+    recordRemoteIceCandidate,
+    consumePendingRemoteIceCandidates,
+    markOfferInitiated,
+    hasInitiatedOffer,
+    markAwaitingAnswer,
+    isAwaitingAnswer,
+  } = useWebRtcPeers();
 
   const buildIceCandidateHandler = useCallback(
-    (targetUserId: number | null) => {
-      if (targetUserId === null) {
-        return null;
-      }
-
+    (targetUserId: number) => {
       return (event: RTCPeerConnectionIceEvent) => {
         if (!event.candidate) {
           return;
@@ -181,10 +180,8 @@ function RoomPage() {
 
   const hasLocalVideoTrack = Boolean(localStream?.getVideoTracks().length);
   const hasLocalAudioTrack = Boolean(localStream?.getAudioTracks().length);
-  const hasRemoteVideoTrack = Boolean(remoteStream?.getVideoTracks().length);
-  const hasRemoteAudioTrack = Boolean(remoteStream?.getAudioTracks().length);
 
-  const displayedRtcError = rtcFlowError || rtcError;
+  const displayedRtcError = rtcFlowError;
 
   const availableActivePeerUserIds = useMemo(
     () =>
@@ -244,6 +241,7 @@ function RoomPage() {
     preferencesMediaDisabled,
     shouldStartLocalMedia,
   ]);
+
   const hasRtcNegotiationPrerequisites = useMemo(() => {
     if (!canSendWebRtc || !isSocketOpen || isFinalState) {
       return false;
@@ -275,8 +273,15 @@ function RoomPage() {
     shouldStartLocalMedia,
   ]);
 
-  const rtcUiState: RtcUiState = useMemo(() => {
-    if (displayedRtcError || rtcConnectionState === "failed") {
+  const meshUiState: MeshUiState = useMemo(() => {
+    if (ROOM_MEDIA_TOPOLOGY !== "mesh") {
+      if (!canSendWebRtc || !isSocketOpen || localUserId === null || isFinalState) {
+        return "idle";
+      }
+      return "connecting";
+    }
+
+    if (displayedRtcError) {
       return "failed";
     }
 
@@ -284,157 +289,90 @@ function RoomPage() {
       return "idle";
     }
 
-    if (availableRtcTargetUserIds.length === 0 || rtcTargetUserId === null) {
-      return "waiting_for_peer";
+    if (availableRtcTargetUserIds.length === 0) {
+      return "waiting_for_peers";
     }
 
     if (localMediaUiState === "requesting_permissions") {
       return "preparing_local_media";
     }
 
-    if (rtcConnectionState === "connecting" || rtcConnectionState === "new") {
-      return "connecting";
+    let connectedCount = 0;
+    let failedCount = 0;
+    let connectingCount = 0;
+    for (const userId of availableRtcTargetUserIds) {
+      const snapshot = peerStates.get(userId);
+      if (!snapshot) {
+        connectingCount += 1;
+        continue;
+      }
+      if (snapshot.connectionState === "connected") {
+        connectedCount += 1;
+      } else if (snapshot.connectionState === "failed") {
+        failedCount += 1;
+      } else {
+        connectingCount += 1;
+      }
     }
 
-    if (rtcConnectionState === "connected") {
+    if (connectedCount === availableRtcTargetUserIds.length) {
       return "connected";
     }
 
-    if (rtcConnectionState === "disconnected") {
-      return "connecting";
+    if (failedCount > 0 && connectedCount === 0 && connectingCount === 0) {
+      return "failed";
     }
 
-    return "ready_to_connect";
+    if (connectedCount > 0) {
+      return "partially_connected";
+    }
+
+    return "connecting";
   }, [
-    availableRtcTargetUserIds.length,
+    availableRtcTargetUserIds,
     canSendWebRtc,
     displayedRtcError,
     isFinalState,
     isSocketOpen,
     localMediaUiState,
     localUserId,
-    rtcConnectionState,
-    rtcTargetUserId,
+    peerStates,
   ]);
 
-  const remoteUiState: RemoteUiState = useMemo(() => {
-    if (displayedRtcError || rtcConnectionState === "failed") {
-      return "failed";
-    }
-
-    if (rtcTargetUserId === null) {
-      return "no_peer_selected";
-    }
-
-    if (!availableRtcTargetUserIds.includes(rtcTargetUserId) || rtcConnectionState === "disconnected") {
-      return "remote_disconnected";
-    }
-
-    if (hasRemoteVideoTrack) {
-      return "video_active";
-    }
-
-    if (hasRemoteAudioTrack) {
-      return "audio_only";
-    }
-
-    if (rtcConnectionState === "connecting" || rtcConnectionState === "new") {
-      return "connecting";
-    }
-
-    return "waiting_for_remote";
-  }, [
-    availableRtcTargetUserIds,
-    displayedRtcError,
-    hasRemoteAudioTrack,
-    hasRemoteVideoTrack,
-    rtcConnectionState,
-    rtcTargetUserId,
-  ]);
-
-  const resetRtcFlowState = useCallback(() => {
-    activeRtcPeerUserIdRef.current = null;
-    pendingRemoteIceCandidatesRef.current = [];
-    hasInitiatedOfferRef.current = false;
-    isAwaitingAnswerRef.current = false;
-    isProcessingQueuedSignalRef.current = false;
-    setRtcFlowError("");
-  }, []);
-
-  const clearRtcNegotiationStateForActivePeer = useCallback(() => {
-    pendingRemoteIceCandidatesRef.current = [];
-    hasInitiatedOfferRef.current = false;
-    isAwaitingAnswerRef.current = false;
-    isProcessingQueuedSignalRef.current = false;
-    setRtcFlowError("");
-  }, []);
-
-  const switchActiveRtcPeer = useCallback(
-    (targetUserId: number) => {
-      if (activeRtcPeerUserIdRef.current === targetUserId) {
+  const flushPendingIceCandidates = useCallback(
+    async (peerConnection: RTCPeerConnection, userId: number) => {
+      if (!peerConnection.remoteDescription) {
         return;
       }
 
-      clearRtcNegotiationStateForActivePeer();
-      closePeerConnection();
-      activeRtcPeerUserIdRef.current = targetUserId;
+      const pendingCandidates = consumePendingRemoteIceCandidates(userId);
+      for (const candidate of pendingCandidates) {
+        await peerConnection.addIceCandidate(candidate);
+      }
     },
-    [clearRtcNegotiationStateForActivePeer, closePeerConnection]
+    [consumePendingRemoteIceCandidates]
   );
 
-  const flushPendingIceCandidates = useCallback(async (peerConnection: RTCPeerConnection) => {
-    if (!peerConnection.remoteDescription) {
-      return;
-    }
-
-    const pendingCandidates = [...pendingRemoteIceCandidatesRef.current];
-    pendingRemoteIceCandidatesRef.current = [];
-
-    for (const candidate of pendingCandidates) {
-      await peerConnection.addIceCandidate(candidate);
-    }
+  const resetMeshFlowState = useCallback(() => {
+    processingSignalPeersRef.current.clear();
+    pendingOfferInitiationsRef.current.clear();
+    setRtcFlowError("");
   }, []);
 
-  const resolveQueuedSignalTarget = useCallback(
-    (signal: QueuedWebRtcSignal): number | "pending" | null => {
-      if (localUserId === null) {
-        return "pending";
-      }
-
-      if (signal.toUserId !== null && signal.toUserId !== localUserId) {
-        return null;
-      }
-
-      if (!availableRtcTargetUserIds.includes(signal.fromUserId)) {
-        return null;
-      }
-
-      if (rtcTargetUserId !== null) {
-        return signal.fromUserId === rtcTargetUserId ? rtcTargetUserId : null;
-      }
-
-      if (availableRtcTargetUserIds.length === 1 && availableRtcTargetUserIds[0] === signal.fromUserId) {
-        return signal.fromUserId;
-      }
-
-      return "pending";
-    },
-    [availableRtcTargetUserIds, localUserId, rtcTargetUserId]
-  );
-
   const doLeaveRoom = useCallback(() => {
-    resetRtcFlowState();
-    closePeerConnection();
+    resetMeshFlowState();
+    closeAllPeerConnections();
     stopLocalMedia();
     leaveRoom();
     navigate("/dashboard", { replace: true });
-  }, [closePeerConnection, leaveRoom, navigate, resetRtcFlowState, stopLocalMedia]);
+  }, [closeAllPeerConnections, leaveRoom, navigate, resetMeshFlowState, stopLocalMedia]);
 
   const handleLeaveRoom = useCallback(() => {
     if (isHost && !isFinalState) {
       setIsHostLeaveDialogOpen(true);
       return;
     }
+
     doLeaveRoom();
   }, [doLeaveRoom, isFinalState, isHost]);
 
@@ -446,26 +384,15 @@ function RoomPage() {
 
   const handleEndMeeting = useCallback(() => {
     setIsHostLeaveDialogOpen(false);
-    resetRtcFlowState();
-    closePeerConnection();
+    resetMeshFlowState();
+    closeAllPeerConnections();
     stopLocalMedia();
     sendEndMeeting();
-  }, [closePeerConnection, resetRtcFlowState, sendEndMeeting, stopLocalMedia]);
+  }, [closeAllPeerConnections, resetMeshFlowState, sendEndMeeting, stopLocalMedia]);
 
   const handleMakeHost = useCallback((userId: number) => {
     sendHostTransfer(userId);
   }, [sendHostTransfer]);
-
-  const handleSelectRtcTarget = useCallback(
-    (targetUserId: number) => {
-      if (!availableRtcTargetUserIds.includes(targetUserId)) {
-        return;
-      }
-
-      setRtcTargetUserId(targetUserId);
-    },
-    [availableRtcTargetUserIds]
-  );
 
   useEffect(() => {
     if (!hasPrerequisites) {
@@ -483,33 +410,6 @@ function RoomPage() {
   }, [audioEnabled, shouldStartLocalMedia, startLocalMedia, stopLocalMedia, videoEnabled]);
 
   useEffect(() => {
-    if (!canSendWebRtc || !isSocketOpen || localUserId === null || isFinalState) {
-      setRtcTargetUserId(null);
-      return;
-    }
-
-    if (rtcTargetUserId !== null) {
-      if (availableRtcTargetUserIds.includes(rtcTargetUserId)) {
-        return;
-      }
-
-      setRtcTargetUserId(null);
-      return;
-    }
-
-    if (availableRtcTargetUserIds.length === 1) {
-      setRtcTargetUserId(availableRtcTargetUserIds[0]);
-    }
-  }, [
-    availableRtcTargetUserIds,
-    canSendWebRtc,
-    isFinalState,
-    isSocketOpen,
-    localUserId,
-    rtcTargetUserId,
-  ]);
-
-  useEffect(() => {
     if (isFinalState && activePanel !== null) {
       setActivePanel(null);
     }
@@ -523,296 +423,337 @@ function RoomPage() {
   }, [doLeaveRoom, isHost]);
 
   useEffect(() => {
+    const processingSignalPeers = processingSignalPeersRef.current;
+    const pendingOfferInitiations = pendingOfferInitiationsRef.current;
     return () => {
-      resetRtcFlowState();
-      closePeerConnection();
+      processingSignalPeers.clear();
+      pendingOfferInitiations.clear();
+      closeAllPeerConnections();
       stopLocalMedia();
     };
-  }, [closePeerConnection, resetRtcFlowState, stopLocalMedia]);
+  }, [closeAllPeerConnections, stopLocalMedia]);
 
   useEffect(() => {
-    if (rtcConnectionState !== "failed") {
-      return;
-    }
-
-    resetRtcFlowState();
-    closePeerConnection();
-  }, [closePeerConnection, resetRtcFlowState, rtcConnectionState]);
-
-  useEffect(() => {
-    const resolvedLocalUserId = localUserId;
-    const resolvedTargetUserId = rtcTargetUserId;
-    const canParticipateInRtc =
-      canSendWebRtc &&
-      isSocketOpen &&
-      !isFinalState &&
-      resolvedLocalUserId !== null &&
-      resolvedTargetUserId !== null;
-
-    if (!canParticipateInRtc) {
-      resetRtcFlowState();
-      closePeerConnection();
-      return;
-    }
-
-    switchActiveRtcPeer(resolvedTargetUserId);
-
-    if (
-      resolvedLocalUserId >= resolvedTargetUserId ||
-      hasInitiatedOfferRef.current ||
-      isAwaitingAnswerRef.current ||
-      !hasRtcNegotiationPrerequisites
-    ) {
-      return;
-    }
-
-    const currentPeerConnection = createPeerConnection(
-      localStream,
-      buildIceCandidateHandler(resolvedTargetUserId)
-    );
-    if (!currentPeerConnection) {
-      setRtcFlowError("Unable to initialize WebRTC connection.");
-      return;
-    }
-
-    if (currentPeerConnection.signalingState !== "stable") {
-      return;
-    }
-
-    hasInitiatedOfferRef.current = true;
-    isAwaitingAnswerRef.current = true;
-    let cancelled = false;
-
-    void (async () => {
-      try {
-        const offer = await currentPeerConnection.createOffer();
-        await currentPeerConnection.setLocalDescription(offer);
-        const localSdp = currentPeerConnection.localDescription?.sdp;
-        if (typeof localSdp !== "string" || localSdp.length === 0) {
-          throw new Error("Failed to create local WebRTC offer.");
-        }
-
-        if (cancelled) {
-          return;
-        }
-
-        const didSendOffer = sendWebRtcOffer(resolvedTargetUserId, localSdp);
-        if (!didSendOffer) {
-          hasInitiatedOfferRef.current = false;
-          isAwaitingAnswerRef.current = false;
-          setRtcFlowError("Unable to send WebRTC offer to the remote participant.");
-          return;
-        }
-
-        setRtcFlowError("");
-      } catch (error) {
-        hasInitiatedOfferRef.current = false;
-        isAwaitingAnswerRef.current = false;
-        if (!cancelled) {
-          setRtcFlowError(toErrorMessage(error, "Failed to create or send a WebRTC offer."));
-        }
+    if (ROOM_MEDIA_TOPOLOGY !== "mesh") {
+      pendingOfferInitiationsRef.current.clear();
+      if (peerStates.size > 0) {
+        closeAllPeerConnections();
       }
-    })();
+      return;
+    }
 
-    return () => {
-      cancelled = true;
-    };
+    if (!canSendWebRtc || !isSocketOpen || isFinalState || localUserId === null) {
+      pendingOfferInitiationsRef.current.clear();
+      // Only close connections when there are entries to close; unconditional
+      // closeAllPeerConnections() always publishes a new Map reference which
+      // re-triggers this effect (peerStates dep), creating a render loop while
+      // the room is in a non-RTC state.
+      if (peerStates.size > 0) {
+        closeAllPeerConnections();
+      }
+      return;
+    }
+
+    const activeSet = new Set(availableRtcTargetUserIds);
+
+    const trackedPeerIds = new Set<number>([
+      ...peerStates.keys(),
+      ...pendingOfferInitiationsRef.current,
+    ]);
+    for (const trackedUserId of trackedPeerIds) {
+      if (!activeSet.has(trackedUserId)) {
+        closePeerConnectionForUser(trackedUserId);
+        pendingOfferInitiationsRef.current.delete(trackedUserId);
+      }
+    }
+
+    if (!hasRtcNegotiationPrerequisites) {
+      return;
+    }
+
+    for (const targetUserId of availableRtcTargetUserIds) {
+      if (localUserId >= targetUserId) {
+        continue;
+      }
+
+      if (pendingOfferInitiationsRef.current.has(targetUserId)) {
+        continue;
+      }
+
+      // Failed/closed/disconnected entries are stale for this initiator loop.
+      // Same-user reconnects often leave a previous connection in
+      // "disconnected", and with lower-ID-initiates we can otherwise miss
+      // renegotiation for an extended period.
+      const existingSnapshot = peerStates.get(targetUserId);
+      const isStale =
+        existingSnapshot !== undefined &&
+        (existingSnapshot.connectionState === "failed" ||
+          existingSnapshot.connectionState === "closed" ||
+          existingSnapshot.connectionState === "disconnected");
+
+      if (existingSnapshot && !isStale) {
+        // Healthy entry (new / connecting / connected) — skip.
+        continue;
+      }
+
+      if (isStale) {
+        closePeerConnectionForUser(targetUserId);
+      }
+
+      const peerConnection = createPeerConnectionForUser(
+        targetUserId,
+        localStream,
+        buildIceCandidateHandler(targetUserId)
+      );
+
+      if (!peerConnection) {
+        setRtcFlowError(`Unable to initialize WebRTC connection to user ${targetUserId}.`);
+        continue;
+      }
+
+      if (peerConnection.signalingState !== "stable") {
+        continue;
+      }
+
+      if (hasInitiatedOffer(targetUserId) || isAwaitingAnswer(targetUserId)) {
+        continue;
+      }
+
+      pendingOfferInitiationsRef.current.add(targetUserId);
+      markOfferInitiated(targetUserId, true);
+      markAwaitingAnswer(targetUserId, true);
+
+      void (async () => {
+        try {
+          const offer = await peerConnection.createOffer();
+          await peerConnection.setLocalDescription(offer);
+          const localSdp = peerConnection.localDescription?.sdp;
+          if (typeof localSdp !== "string" || localSdp.length === 0) {
+            throw new Error("Failed to create local WebRTC offer.");
+          }
+
+          const didSendOffer = sendWebRtcOffer(targetUserId, localSdp);
+          if (!didSendOffer) {
+            markOfferInitiated(targetUserId, false);
+            markAwaitingAnswer(targetUserId, false);
+            setRtcFlowError("Unable to send WebRTC offer to a remote participant.");
+            return;
+          }
+        } catch (error) {
+          markOfferInitiated(targetUserId, false);
+          markAwaitingAnswer(targetUserId, false);
+          setRtcFlowError(toErrorMessage(error, "Failed to create or send a WebRTC offer."));
+        } finally {
+          pendingOfferInitiationsRef.current.delete(targetUserId);
+        }
+      })();
+    }
   }, [
+    availableRtcTargetUserIds,
     buildIceCandidateHandler,
     canSendWebRtc,
-    closePeerConnection,
-    createPeerConnection,
+    closeAllPeerConnections,
+    closePeerConnectionForUser,
+    createPeerConnectionForUser,
+    hasInitiatedOffer,
     hasRtcNegotiationPrerequisites,
+    isAwaitingAnswer,
     isFinalState,
     isSocketOpen,
     localStream,
     localUserId,
-    resetRtcFlowState,
-    rtcTargetUserId,
+    markAwaitingAnswer,
+    markOfferInitiated,
+    peerStates,
     sendWebRtcOffer,
-    switchActiveRtcPeer,
   ]);
 
   useEffect(() => {
+    if (ROOM_MEDIA_TOPOLOGY !== "mesh") {
+      return;
+    }
+
     if (
       queuedWebRtcSignals.length === 0 ||
       !canSendWebRtc ||
       !isSocketOpen ||
       isFinalState ||
-      isProcessingQueuedSignalRef.current
+      localUserId === null
     ) {
       return;
     }
 
-    const nextQueuedSignal = queuedWebRtcSignals[0];
-    const resolvedTargetUserId = resolveQueuedSignalTarget(nextQueuedSignal);
-    if (resolvedTargetUserId === "pending") {
-      return;
-    }
-
-    if (resolvedTargetUserId === null) {
-      consumeWebRtcSignal(nextQueuedSignal.queueId);
-      return;
-    }
-
-    if (rtcTargetUserId === null && availableRtcTargetUserIds.length === 1) {
-      setRtcTargetUserId(resolvedTargetUserId);
-    }
-
-    if (activeRtcPeerUserIdRef.current !== resolvedTargetUserId) {
-      switchActiveRtcPeer(resolvedTargetUserId);
-    }
-
-    isProcessingQueuedSignalRef.current = true;
-    let shouldConsumeSignal = false;
-
-    const getCurrentPeerConnection = (): RTCPeerConnection | null => {
-      if (!hasRtcNegotiationPrerequisites) {
+    const resolveSignalTarget = (signal: QueuedWebRtcSignal): number | null => {
+      if (signal.toUserId !== null && signal.toUserId !== localUserId) {
         return null;
       }
 
-      return createPeerConnection(
-        localStream,
-        buildIceCandidateHandler(resolvedTargetUserId)
-      );
+      if (!availableRtcTargetUserIds.includes(signal.fromUserId)) {
+        return null;
+      }
+
+      return signal.fromUserId;
     };
 
-    void (async () => {
-      try {
-        switch (nextQueuedSignal.type) {
-          case "webrtc.offer": {
-            if (!hasRtcNegotiationPrerequisites || localUserId === null) {
-              return;
-            }
-
-            if (localUserId < nextQueuedSignal.fromUserId) {
-              shouldConsumeSignal = true;
-              return;
-            }
-
-            const currentPeerConnection = getCurrentPeerConnection();
-            if (!currentPeerConnection) {
-              return;
-            }
-
-            const remoteSdp = nextQueuedSignal.sdp;
-            if (typeof remoteSdp !== "string" || remoteSdp.length === 0) {
-              shouldConsumeSignal = true;
-              return;
-            }
-
-            if (currentPeerConnection.signalingState !== "stable") {
-              return;
-            }
-
-            await currentPeerConnection.setRemoteDescription({
-              type: "offer",
-              sdp: remoteSdp,
-            });
-            await flushPendingIceCandidates(currentPeerConnection);
-
-            const answer = await currentPeerConnection.createAnswer();
-            await currentPeerConnection.setLocalDescription(answer);
-            const localSdp = currentPeerConnection.localDescription?.sdp;
-            if (typeof localSdp !== "string" || localSdp.length === 0) {
-              throw new Error("Failed to create local WebRTC answer.");
-            }
-
-            const didSendAnswer = sendWebRtcAnswer(nextQueuedSignal.fromUserId, localSdp);
-            if (!didSendAnswer) {
-              shouldConsumeSignal = true;
-              setRtcFlowError("Unable to send WebRTC answer to the remote participant.");
-              return;
-            }
-
-            shouldConsumeSignal = true;
-            setRtcFlowError("");
-            break;
-          }
-          case "webrtc.answer": {
-            const currentPeerConnection = getCurrentPeerConnection();
-            if (!currentPeerConnection) {
-              return;
-            }
-
-            const remoteSdp = nextQueuedSignal.sdp;
-            if (typeof remoteSdp !== "string" || remoteSdp.length === 0) {
-              shouldConsumeSignal = true;
-              return;
-            }
-
-            if (!isAwaitingAnswerRef.current || currentPeerConnection.signalingState !== "have-local-offer") {
-              shouldConsumeSignal = true;
-              return;
-            }
-
-            await currentPeerConnection.setRemoteDescription({
-              type: "answer",
-              sdp: remoteSdp,
-            });
-            await flushPendingIceCandidates(currentPeerConnection);
-            isAwaitingAnswerRef.current = false;
-            shouldConsumeSignal = true;
-            setRtcFlowError("");
-            break;
-          }
-          case "webrtc.ice_candidate": {
-            const candidate = nextQueuedSignal.candidate;
-            if (!candidate) {
-              shouldConsumeSignal = true;
-              return;
-            }
-
-            const currentPeerConnection = getCurrentPeerConnection();
-            if (!currentPeerConnection) {
-              pendingRemoteIceCandidatesRef.current.push(candidate);
-              shouldConsumeSignal = true;
-              return;
-            }
-
-            if (!currentPeerConnection.remoteDescription) {
-              pendingRemoteIceCandidatesRef.current.push(candidate);
-              shouldConsumeSignal = true;
-              return;
-            }
-
-            await currentPeerConnection.addIceCandidate(candidate);
-            shouldConsumeSignal = true;
-            setRtcFlowError("");
-            break;
-          }
-          default:
-            shouldConsumeSignal = true;
-            break;
-        }
-      } catch (error) {
-        shouldConsumeSignal = true;
-        isAwaitingAnswerRef.current = false;
-        setRtcFlowError(toErrorMessage(error, "Failed to apply incoming WebRTC signaling data."));
-      } finally {
-        isProcessingQueuedSignalRef.current = false;
-        if (shouldConsumeSignal) {
-          consumeWebRtcSignal(nextQueuedSignal.queueId);
-        }
+    for (const queuedSignal of queuedWebRtcSignals) {
+      const fromUserId = resolveSignalTarget(queuedSignal);
+      if (fromUserId === null) {
+        consumeWebRtcSignal(queuedSignal.queueId);
+        continue;
       }
-    })();
+
+      if (processingSignalPeersRef.current.has(fromUserId)) {
+        continue;
+      }
+
+      processingSignalPeersRef.current.add(fromUserId);
+      let shouldConsumeSignal = false;
+
+      void (async () => {
+        try {
+          switch (queuedSignal.type) {
+            case "webrtc.offer": {
+              if (!hasRtcNegotiationPrerequisites) {
+                return;
+              }
+
+              if (localUserId < fromUserId) {
+                shouldConsumeSignal = true;
+                return;
+              }
+
+              const remoteSdp = queuedSignal.sdp;
+              if (typeof remoteSdp !== "string" || remoteSdp.length === 0) {
+                shouldConsumeSignal = true;
+                return;
+              }
+
+              const peerConnection = createPeerConnectionForUser(
+                fromUserId,
+                localStream,
+                buildIceCandidateHandler(fromUserId)
+              );
+
+              if (!peerConnection) {
+                shouldConsumeSignal = true;
+                setRtcFlowError(
+                  `Unable to initialize WebRTC connection to user ${fromUserId}.`
+                );
+                return;
+              }
+
+              if (
+                peerConnection.signalingState !== "stable" &&
+                peerConnection.signalingState !== "have-remote-offer"
+              ) {
+                return;
+              }
+
+              await peerConnection.setRemoteDescription({
+                type: "offer",
+                sdp: remoteSdp,
+              });
+              await flushPendingIceCandidates(peerConnection, fromUserId);
+
+              const answer = await peerConnection.createAnswer();
+              await peerConnection.setLocalDescription(answer);
+              const localSdp = peerConnection.localDescription?.sdp;
+              if (typeof localSdp !== "string" || localSdp.length === 0) {
+                throw new Error("Failed to create local WebRTC answer.");
+              }
+
+              const didSendAnswer = sendWebRtcAnswer(fromUserId, localSdp);
+              if (!didSendAnswer) {
+                shouldConsumeSignal = true;
+                setRtcFlowError("Unable to send WebRTC answer to a remote participant.");
+                return;
+              }
+
+              shouldConsumeSignal = true;
+              break;
+            }
+            case "webrtc.answer": {
+              const peerConnection = getPeerConnection(fromUserId);
+              if (!peerConnection) {
+                shouldConsumeSignal = true;
+                return;
+              }
+
+              const remoteSdp = queuedSignal.sdp;
+              if (typeof remoteSdp !== "string" || remoteSdp.length === 0) {
+                shouldConsumeSignal = true;
+                return;
+              }
+
+              if (
+                !isAwaitingAnswer(fromUserId) ||
+                peerConnection.signalingState !== "have-local-offer"
+              ) {
+                shouldConsumeSignal = true;
+                return;
+              }
+
+              await peerConnection.setRemoteDescription({
+                type: "answer",
+                sdp: remoteSdp,
+              });
+              await flushPendingIceCandidates(peerConnection, fromUserId);
+              markAwaitingAnswer(fromUserId, false);
+              shouldConsumeSignal = true;
+              break;
+            }
+            case "webrtc.ice_candidate": {
+              const candidate = queuedSignal.candidate;
+              if (!candidate) {
+                shouldConsumeSignal = true;
+                return;
+              }
+
+              const peerConnection = getPeerConnection(fromUserId);
+              if (!peerConnection || !peerConnection.remoteDescription) {
+                recordRemoteIceCandidate(fromUserId, candidate);
+                shouldConsumeSignal = true;
+                return;
+              }
+
+              await peerConnection.addIceCandidate(candidate);
+              shouldConsumeSignal = true;
+              break;
+            }
+            default:
+              shouldConsumeSignal = true;
+              break;
+          }
+        } catch (error) {
+          shouldConsumeSignal = true;
+          markAwaitingAnswer(fromUserId, false);
+          setRtcFlowError(toErrorMessage(error, "Failed to apply incoming WebRTC signaling data."));
+        } finally {
+          processingSignalPeersRef.current.delete(fromUserId);
+          if (shouldConsumeSignal) {
+            consumeWebRtcSignal(queuedSignal.queueId);
+          }
+        }
+      })();
+    }
   }, [
-    availableRtcTargetUserIds.length,
+    availableRtcTargetUserIds,
     buildIceCandidateHandler,
     canSendWebRtc,
     consumeWebRtcSignal,
-    createPeerConnection,
+    createPeerConnectionForUser,
     flushPendingIceCandidates,
+    getPeerConnection,
     hasRtcNegotiationPrerequisites,
+    isAwaitingAnswer,
     isFinalState,
     isSocketOpen,
     localStream,
     localUserId,
+    markAwaitingAnswer,
     queuedWebRtcSignals,
-    resolveQueuedSignalTarget,
-    rtcTargetUserId,
+    recordRemoteIceCandidate,
     sendWebRtcAnswer,
-    switchActiveRtcPeer,
   ]);
 
   if (!hasPrerequisites) {
@@ -861,15 +802,12 @@ function RoomPage() {
           localUserId={localUserId}
           localDisplayName={displayName}
           localStream={localStream}
-          remoteStream={remoteStream}
           hasLocalVideoTrack={hasLocalVideoTrack}
           hasLocalAudioTrack={hasLocalAudioTrack}
-          hasRemoteVideoTrack={hasRemoteVideoTrack}
-          rtcTargetUserId={rtcTargetUserId}
           localMediaUiState={localMediaUiState}
-          rtcUiState={rtcUiState}
-          remoteUiState={remoteUiState}
-          onSelectRtcTarget={handleSelectRtcTarget}
+          peerStates={peerStates}
+          meshUiState={meshUiState}
+          mediaTopology={ROOM_MEDIA_TOPOLOGY}
         />
 
         {isFinalState ? (
@@ -901,10 +839,13 @@ function RoomPage() {
                 Room state: {roomState || "Unknown"}
               </p>
               <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
-                RTC target: {rtcTargetUserId ?? "None"}
+                Mesh peers: {peerStates.size}
               </p>
               <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
-                Peer state: {formatStatusLabel(rtcConnectionState)}
+                Mesh state: {formatStatusLabel(meshUiState)}
+              </p>
+              <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
+                Topology: {ROOM_MEDIA_TOPOLOGY}
               </p>
             </div>
           ) : null}
@@ -924,15 +865,14 @@ function RoomPage() {
       <RoomDrawer
         isOpen={activePanel === "active"}
         title="Active participants"
-        description="Connected room members and peer selection"
+        description="Connected room members and mesh status"
         onClose={() => setActivePanel(null)}
       >
         <ParticipantsPanel
           activeUsers={activeUsers}
           localUserId={localUserId}
-          rtcTargetUserId={rtcTargetUserId}
+          peerStates={peerStates}
           isHost={isHost}
-          onSelectRtcTarget={handleSelectRtcTarget}
           onMakeHost={handleMakeHost}
         />
       </RoomDrawer>
