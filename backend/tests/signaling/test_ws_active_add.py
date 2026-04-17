@@ -4,7 +4,11 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.signaling import ws as ws_module
-from tests.room_membership.helpers import create_member, create_room, create_user
+from tests.room_membership.helpers import (
+    create_member,
+    create_room,
+    create_user,
+)
 
 
 class FakeWebSocket:
@@ -53,20 +57,58 @@ def test_broadcast_active_added_notifies_host_and_other_actives_on_reconnect(
     host = create_user(db_session, user_id=1, username="host-active-add")
     user_two = create_user(db_session, user_id=2, username="peer-two")
     user_three = create_user(db_session, user_id=3, username="peer-three")
-    room = create_room(db_session, room_code="ACTIVEADD-RECONNECT", host_id=host.id)
+    room = create_room(
+        db_session,
+        room_code="ACTIVEADD-RECONNECT",
+        host_id=host.id,
+    )
 
-    create_member(db_session, room_id=room.id, user_id=host.id, state="active", role="host")
-    create_member(db_session, room_id=room.id, user_id=user_two.id, state="active")
-    create_member(db_session, room_id=room.id, user_id=user_three.id, state="active")
+    create_member(
+        db_session,
+        room_id=room.id,
+        user_id=host.id,
+        state="active",
+        role="host",
+    )
+    create_member(
+        db_session,
+        room_id=room.id,
+        user_id=user_two.id,
+        state="active",
+    )
+    create_member(
+        db_session,
+        room_id=room.id,
+        user_id=user_three.id,
+        state="active",
+    )
 
     host_ws = FakeWebSocket()
     user_two_old_ws = FakeWebSocket()
     user_two_new_ws = FakeWebSocket()
     user_three_ws = FakeWebSocket()
 
-    _register_connection(room_code=room.room_code, ws=host_ws, role="host", state="active", user_id=host.id)
-    _register_connection(room_code=room.room_code, ws=user_two_old_ws, role="participant", state="active", user_id=user_two.id)
-    _register_connection(room_code=room.room_code, ws=user_three_ws, role="participant", state="active", user_id=user_three.id)
+    _register_connection(
+        room_code=room.room_code,
+        ws=host_ws,
+        role="host",
+        state="active",
+        user_id=host.id,
+    )
+    _register_connection(
+        room_code=room.room_code,
+        ws=user_two_old_ws,
+        role="participant",
+        state="active",
+        user_id=user_two.id,
+    )
+    _register_connection(
+        room_code=room.room_code,
+        ws=user_three_ws,
+        role="participant",
+        state="active",
+        user_id=user_three.id,
+    )
 
     replaced = ws_module.room_manager.replace_connection(
         room_code=room.room_code,
@@ -103,16 +145,37 @@ def test_broadcast_active_added_skips_host_socket_when_host_is_subject(
     db_session: Session,
 ) -> None:
     host = create_user(db_session, user_id=11, username="host-subject")
-    participant = create_user(db_session, user_id=12, username="participant-subject")
+    participant = create_user(
+        db_session,
+        user_id=12,
+        username="participant-subject",
+    )
     room = create_room(db_session, room_code="ACTIVEADD-HOST", host_id=host.id)
 
-    create_member(db_session, room_id=room.id, user_id=host.id, state="active", role="host")
-    create_member(db_session, room_id=room.id, user_id=participant.id, state="active")
+    create_member(
+        db_session,
+        room_id=room.id,
+        user_id=host.id,
+        state="active",
+        role="host",
+    )
+    create_member(
+        db_session,
+        room_id=room.id,
+        user_id=participant.id,
+        state="active",
+    )
 
     host_ws = FakeWebSocket()
     participant_ws = FakeWebSocket()
 
-    _register_connection(room_code=room.room_code, ws=host_ws, role="host", state="active", user_id=host.id)
+    _register_connection(
+        room_code=room.room_code,
+        ws=host_ws,
+        role="host",
+        state="active",
+        user_id=host.id,
+    )
     _register_connection(
         room_code=room.room_code,
         ws=participant_ws,
