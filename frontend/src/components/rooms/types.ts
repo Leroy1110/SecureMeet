@@ -7,20 +7,19 @@ export type LocalMediaUiState =
   | "failed"
   | "not_started";
 
-export type RtcUiState =
+export type MeshUiState =
   | "idle"
-  | "waiting_for_peer"
+  | "waiting_for_peers"
   | "preparing_local_media"
-  | "ready_to_connect"
   | "connecting"
   | "connected"
+  | "partially_connected"
   | "failed";
 
-export type RemoteUiState =
-  | "no_peer_selected"
-  | "waiting_for_remote"
+export type PeerTileState =
   | "connecting"
+  | "connected"
   | "audio_only"
   | "video_active"
-  | "remote_disconnected"
+  | "disconnected"
   | "failed";
