@@ -374,6 +374,39 @@ async def _broadcast_active_removed(room_state: RoomState, user_id: int):
             pass
 
 
+async def _broadcast_active_added(
+    db: Session,
+    room_id: int,
+    room_state: RoomState,
+    user_id: int,
+):
+    message_active_add = {
+        "type": "active.add",
+        "payload": {
+            "user": _serialize_user(db, room_id, user_id)
+        }
+    }
+
+    for other_user_id, ws_active in room_state.active_ws.items():
+        if other_user_id == user_id:
+            continue
+
+        try:
+            await ws_active.send_json(message_active_add)
+        except Exception:
+            pass
+
+    if (
+        room_state.host_ws is not None
+        and room_state.host_user_id is not None
+        and room_state.host_user_id != user_id
+    ):
+        try:
+            await room_state.host_ws.send_json(message_active_add)
+        except Exception:
+            pass
+
+
 async def _broadcast_host_removed(room_state: RoomState, host_user_id: int):
     message_active_remove_host = {
         "type": "active.remove",
@@ -863,26 +896,12 @@ async def handler_approve(
             "user_id": payload_user_id
         }
     })
-
-    message_active_add = {
-        "type": "active.add",
-        "payload": {
-            "user": _serialize_user(db, room_id, payload_user_id)
-        }
-    }
-
-    for user_id, ws_active in room_state.active_ws.items():
-        if user_id != payload_user_id:
-            try:
-                await ws_active.send_json(message_active_add)
-            except Exception:
-                pass
-
-    if room_state.host_ws is not None:
-        try:
-            await room_state.host_ws.send_json(message_active_add)
-        except Exception:
-            pass
+    await _broadcast_active_added(
+        db=db,
+        room_id=room_id,
+        room_state=room_state,
+        user_id=payload_user_id,
+    )
 
 
 async def handler_reject(
@@ -1956,6 +1975,12 @@ async def websocket_endpoint(
                     "users": build_active_users_payload(db, room_id, room_state)
                 }
             })
+            await _broadcast_active_added(
+                db=db,
+                room_id=room_id,
+                room_state=room_state,
+                user_id=user_id,
+            )
         else:
             await websocket.close(
                 code=status.WS_1008_POLICY_VIOLATION,
