@@ -16,6 +16,7 @@ export type UseWebRtcPeersResult = {
   closePeerConnectionForUser: (userId: number) => void;
   closeAllPeerConnections: () => void;
   getPeerConnection: (userId: number) => RTCPeerConnection | null;
+  getUsersWithPendingRemoteIceCandidates: () => number[];
   recordRemoteIceCandidate: (userId: number, candidate: RTCIceCandidateInit) => void;
   consumePendingRemoteIceCandidates: (userId: number) => RTCIceCandidateInit[];
   markOfferInitiated: (userId: number, initiated: boolean) => void;
@@ -125,13 +126,17 @@ export const useWebRtcPeers = (): UseWebRtcPeersResult => {
   const closePeerConnectionForUser = useCallback(
     (userId: number) => {
       const entry = peersRef.current.get(userId);
+
+      // Pending remote ICE can exist even before a peer entry is created.
+      // Always clear candidate buffers on explicit user cleanup.
+      pendingRemoteIceCandidatesRef.current.delete(userId);
+
       if (!entry) {
         return;
       }
 
       teardownPeerEntry(entry);
       peersRef.current.delete(userId);
-      pendingRemoteIceCandidatesRef.current.delete(userId);
       publishPeerStates();
     },
     [publishPeerStates, teardownPeerEntry]
@@ -322,6 +327,10 @@ export const useWebRtcPeers = (): UseWebRtcPeersResult => {
     return entry.peerConnection;
   }, []);
 
+  const getUsersWithPendingRemoteIceCandidates = useCallback((): number[] => {
+    return Array.from(pendingRemoteIceCandidatesRef.current.keys());
+  }, []);
+
   const recordRemoteIceCandidate = useCallback(
     (userId: number, candidate: RTCIceCandidateInit) => {
       const existing = pendingRemoteIceCandidatesRef.current.get(userId);
@@ -384,6 +393,7 @@ export const useWebRtcPeers = (): UseWebRtcPeersResult => {
     closePeerConnectionForUser,
     closeAllPeerConnections,
     getPeerConnection,
+    getUsersWithPendingRemoteIceCandidates,
     recordRemoteIceCandidate,
     consumePendingRemoteIceCandidates,
     markOfferInitiated,

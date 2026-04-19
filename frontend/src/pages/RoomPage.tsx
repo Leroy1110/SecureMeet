@@ -153,6 +153,7 @@ function RoomPage() {
     closePeerConnectionForUser,
     closeAllPeerConnections,
     getPeerConnection,
+    getUsersWithPendingRemoteIceCandidates,
     recordRemoteIceCandidate,
     consumePendingRemoteIceCandidates,
     markOfferInitiated,
@@ -377,8 +378,11 @@ function RoomPage() {
   }, [doLeaveRoom, isFinalState, isHost]);
 
   const handleTransferAndLeave = useCallback((toUserId: number) => {
+    const didRequestTransfer = sendHostTransfer(toUserId);
     setIsHostLeaveDialogOpen(false);
-    sendHostTransfer(toUserId);
+    if (!didRequestTransfer) {
+      return;
+    }
     pendingLeaveAfterTransferRef.current = true;
   }, [sendHostTransfer]);
 
@@ -434,9 +438,11 @@ function RoomPage() {
   }, [closeAllPeerConnections, stopLocalMedia]);
 
   useEffect(() => {
+    const pendingIceCandidateUserIds = getUsersWithPendingRemoteIceCandidates();
+
     if (ROOM_MEDIA_TOPOLOGY !== "mesh") {
       pendingOfferInitiationsRef.current.clear();
-      if (peerStates.size > 0) {
+      if (peerStates.size > 0 || pendingIceCandidateUserIds.length > 0) {
         closeAllPeerConnections();
       }
       return;
@@ -448,7 +454,7 @@ function RoomPage() {
       // closeAllPeerConnections() always publishes a new Map reference which
       // re-triggers this effect (peerStates dep), creating a render loop while
       // the room is in a non-RTC state.
-      if (peerStates.size > 0) {
+      if (peerStates.size > 0 || pendingIceCandidateUserIds.length > 0) {
         closeAllPeerConnections();
       }
       return;
@@ -459,6 +465,7 @@ function RoomPage() {
     const trackedPeerIds = new Set<number>([
       ...peerStates.keys(),
       ...pendingOfferInitiationsRef.current,
+      ...pendingIceCandidateUserIds,
     ]);
     for (const trackedUserId of trackedPeerIds) {
       if (!activeSet.has(trackedUserId)) {
@@ -555,6 +562,7 @@ function RoomPage() {
     closeAllPeerConnections,
     closePeerConnectionForUser,
     createPeerConnectionForUser,
+    getUsersWithPendingRemoteIceCandidates,
     hasInitiatedOffer,
     hasRtcNegotiationPrerequisites,
     isAwaitingAnswer,
