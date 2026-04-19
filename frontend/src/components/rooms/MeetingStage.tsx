@@ -1,21 +1,23 @@
 import { type RoomPresenceUser } from "../../hooks/useRoomSocket";
+import type { PeerConnectionSnapshot } from "../../hooks/useWebRtcPeers";
+import {
+  MESH_SOFT_PARTICIPANT_LIMIT,
+  type MediaTopology,
+} from "../../lib/mediaTopology";
 import ParticipantTile from "./ParticipantTile";
-import type { LocalMediaUiState, RemoteUiState, RtcUiState } from "./types";
+import type { LocalMediaUiState, MeshUiState, PeerTileState } from "./types";
 
 type MeetingStageProps = {
   activeUsers: RoomPresenceUser[];
   localUserId: number | null;
   localDisplayName: string;
   localStream: MediaStream | null;
-  remoteStream: MediaStream | null;
   hasLocalVideoTrack: boolean;
   hasLocalAudioTrack: boolean;
-  hasRemoteVideoTrack: boolean;
-  rtcTargetUserId: number | null;
   localMediaUiState: LocalMediaUiState;
-  rtcUiState: RtcUiState;
-  remoteUiState: RemoteUiState;
-  onSelectRtcTarget: (userId: number) => void;
+  peerStates: Map<number, PeerConnectionSnapshot>;
+  meshUiState: MeshUiState;
+  mediaTopology: MediaTopology;
 };
 
 const getPresenceUserLabel = (user: RoomPresenceUser): string => {
@@ -40,24 +42,66 @@ const localMediaDescriptionByState: Record<LocalMediaUiState, string> = {
   not_started: "Waiting for room",
 };
 
-const remoteDescriptionByState: Record<RemoteUiState, string> = {
-  no_peer_selected: "Select participant",
-  waiting_for_remote: "Waiting for remote media",
+const meshDescriptionByState: Record<MeshUiState, string> = {
+  idle: "Idle",
+  waiting_for_peers: "Waiting for participants",
+  preparing_local_media: "Preparing local media",
   connecting: "Connecting",
-  audio_only: "Remote audio only",
-  video_active: "Remote video live",
-  remote_disconnected: "Remote disconnected",
-  failed: "RTC failed",
+  connected: "All peers connected",
+  partially_connected: "Partial connectivity",
+  failed: "Failed",
 };
 
-const rtcDescriptionByState: Record<RtcUiState, string> = {
-  idle: "Idle",
-  waiting_for_peer: "Waiting for participant",
-  preparing_local_media: "Preparing local media",
-  ready_to_connect: "Ready",
+const peerTileDescriptionByState: Record<PeerTileState, string> = {
   connecting: "Connecting",
   connected: "Connected",
+  audio_only: "Audio only",
+  video_active: "Video live",
+  disconnected: "Disconnected",
   failed: "Failed",
+};
+
+const derivePeerTileState = (
+  snapshot: PeerConnectionSnapshot | undefined,
+  hasVideo: boolean,
+  hasAudio: boolean
+): PeerTileState => {
+  if (!snapshot) {
+    return "connecting";
+  }
+
+  if (snapshot.connectionState === "failed" || snapshot.error) {
+    return "failed";
+  }
+
+  if (snapshot.connectionState === "disconnected" || snapshot.connectionState === "closed") {
+    return "disconnected";
+  }
+
+  if (snapshot.connectionState === "connected") {
+    if (hasVideo) {
+      return "video_active";
+    }
+    if (hasAudio) {
+      return "audio_only";
+    }
+    return "connected";
+  }
+
+  return "connecting";
+};
+
+const getGridColumnsClass = (totalTiles: number): string => {
+  if (totalTiles <= 1) {
+    return "grid-cols-1";
+  }
+  if (totalTiles <= 2) {
+    return "grid-cols-1 sm:grid-cols-2";
+  }
+  if (totalTiles <= 4) {
+    return "grid-cols-1 sm:grid-cols-2";
+  }
+  return "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3";
 };
 
 const MeetingStage = ({
@@ -65,21 +109,25 @@ const MeetingStage = ({
   localUserId,
   localDisplayName,
   localStream,
-  remoteStream,
   hasLocalVideoTrack,
   hasLocalAudioTrack,
-  hasRemoteVideoTrack,
-  rtcTargetUserId,
   localMediaUiState,
-  rtcUiState,
-  remoteUiState,
-  onSelectRtcTarget,
+  peerStates,
+  meshUiState,
+  mediaTopology,
 }: MeetingStageProps) => {
   const remoteParticipants = activeUsers.filter(
     (user) => user.userId !== null && user.userId > 0 && user.userId !== localUserId
   );
-  const selectedRemoteParticipant = remoteParticipants.find((user) => user.userId === rtcTargetUserId) ?? null;
-  const nonSelectedRemoteParticipants = remoteParticipants.filter((user) => user.userId !== rtcTargetUserId);
+
+  const totalTiles = remoteParticipants.length + 1;
+  const gridColumnsClass = getGridColumnsClass(totalTiles);
+
+  const isMeshOverloaded =
+    mediaTopology === "mesh" &&
+    totalTiles > MESH_SOFT_PARTICIPANT_LIMIT;
+
+  const topologyLabel = mediaTopology === "mesh" ? "Mesh" : "SFU";
 
   return (
     <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.5)] dark:border-slate-800 dark:bg-slate-900 sm:p-5">
@@ -88,46 +136,20 @@ const MeetingStage = ({
           Local: {localMediaDescriptionByState[localMediaUiState]}
         </span>
         <span className="rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
-          RTC: {rtcDescriptionByState[rtcUiState]}
+          {topologyLabel}: {meshDescriptionByState[meshUiState]}
         </span>
         <span className="rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
-          Remote: {remoteDescriptionByState[remoteUiState]}
+          Participants: {totalTiles}
         </span>
       </div>
 
-      {remoteParticipants.length > 1 ? (
-        <div className="mb-4 rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
-            Select active peer
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {remoteParticipants.map((user) => {
-              const userId = user.userId;
-              if (userId === null) {
-                return null;
-              }
-
-              const selected = userId === rtcTargetUserId;
-              return (
-                <button
-                  key={userId}
-                  type="button"
-                  onClick={() => onSelectRtcTarget(userId)}
-                  className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium transition ${
-                    selected
-                      ? "border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/50 dark:text-blue-300"
-                      : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                  }`}
-                >
-                  {getPresenceUserLabel(user)}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+      {isMeshOverloaded ? (
+        <p className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+          Mesh topology is best for up to {MESH_SOFT_PARTICIPANT_LIMIT} participants. With {totalTiles} participants in the room, video quality and bandwidth may degrade.
+        </p>
       ) : null}
 
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className={`grid gap-3 ${gridColumnsClass}`}>
         <ParticipantTile
           name={localDisplayName}
           label="You"
@@ -137,55 +159,34 @@ const MeetingStage = ({
           muted
         />
 
-        {selectedRemoteParticipant ? (
-          <ParticipantTile
-            key={`selected:${selectedRemoteParticipant.userId ?? selectedRemoteParticipant.label}`}
-            name={getPresenceUserLabel(selectedRemoteParticipant)}
-            label="Selected participant"
-            status={remoteDescriptionByState[remoteUiState]}
-            stream={remoteStream}
-            showVideo={hasRemoteVideoTrack}
-            playAudioWhenAudioOnly
-            selected
-            selectable
-            onSelect={() => {
-              const userId = selectedRemoteParticipant.userId;
-              if (userId !== null) {
-                onSelectRtcTarget(userId);
-              }
-            }}
-          />
-        ) : (
-          <div className="flex aspect-video items-center justify-center rounded-2xl border border-slate-300 bg-slate-100 px-4 text-center text-sm font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-            {remoteParticipants.length > 0
-              ? "Select a participant tile to start the single-peer WebRTC connection."
-              : "No remote participants are active yet."}
-          </div>
-        )}
-
-        {nonSelectedRemoteParticipants.map((user) => {
+        {remoteParticipants.map((user) => {
           const userId = user.userId;
           if (userId === null) {
             return null;
           }
 
+          const snapshot = peerStates.get(userId);
+          const remoteStream = snapshot?.remoteStream ?? null;
+          const hasRemoteVideo = Boolean(remoteStream?.getVideoTracks().length);
+          const hasRemoteAudio = Boolean(remoteStream?.getAudioTracks().length);
+          const tileState = derivePeerTileState(snapshot, hasRemoteVideo, hasRemoteAudio);
+          const statusLabel = snapshot?.error || peerTileDescriptionByState[tileState];
+
           return (
             <ParticipantTile
-              key={`presence:${userId}`}
+              key={`peer:${userId}`}
               name={getPresenceUserLabel(user)}
-              label="Connected participant"
-              status="Presence only"
-              stream={null}
-              showVideo={false}
-              selectable
-              selected={userId === rtcTargetUserId}
-              onSelect={() => onSelectRtcTarget(userId)}
+              label="Participant"
+              status={statusLabel}
+              stream={remoteStream}
+              showVideo={hasRemoteVideo}
+              playAudioWhenAudioOnly
             />
           );
         })}
 
-        {!hasLocalVideoTrack && !hasLocalAudioTrack ? (
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 md:col-span-2">
+        {!hasLocalVideoTrack && !hasLocalAudioTrack && remoteParticipants.length === 0 ? (
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 sm:col-span-2">
             Local preview is not publishing media right now. You can still stay connected to room presence and chat.
           </div>
         ) : null}

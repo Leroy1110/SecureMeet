@@ -120,6 +120,34 @@ const HOST_MODERATION_ERROR_FRAGMENTS = [
   "host cannot be kicked",
   "user not connected",
 ];
+const HOST_CONTROL_ERROR_FRAGMENTS = [
+  "only host can transfer host role",
+  "cannot transfer host to yourself",
+  "target user is not an active participant",
+  "failed to persist host transfer",
+  "host transfer failed after db update",
+  "only host can end the meeting",
+  "failed to end meeting",
+];
+const WEBRTC_ERROR_FRAGMENTS = [
+  "only host or active users can send webrtc signaling",
+  "cannot send webrtc signaling to yourself",
+  "target user is not active",
+  "failed to relay webrtc",
+  "invalid sdp in payload",
+  "invalid candidate",
+];
+const CHAT_ERROR_FRAGMENTS = [
+  "chat",
+  "content",
+  "content too long",
+  "only active users can send messages",
+  "to_user_id must be int or null",
+  "user not active",
+  "failed to persist chat message",
+  "invalid persisted message metadata",
+  "failed to send message to user",
+];
 const TERMINAL_CLOSE_REASON_FRAGMENTS = [
   "room is not active",
   "room has expired",
@@ -1310,12 +1338,24 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
             ? pickString(payloadValue, ["message", "detail", "error"])
             : "";
           const normalizedMessage = message.toLowerCase();
+
+          const isWebRtcRelatedError =
+            lastOutgoingMessageTypeRef.current === "webrtc.offer" ||
+            lastOutgoingMessageTypeRef.current === "webrtc.answer" ||
+            lastOutgoingMessageTypeRef.current === "webrtc.ice_candidate" ||
+            WEBRTC_ERROR_FRAGMENTS.some((fragment) => normalizedMessage.includes(fragment)) ||
+            normalizedMessage.includes("webrtc") ||
+            normalizedMessage.includes("sdp") ||
+            normalizedMessage.includes("candidate");
+          if (isWebRtcRelatedError) {
+            setLastError(message || "Failed to exchange WebRTC signaling data.");
+            lastOutgoingMessageTypeRef.current = null;
+            break;
+          }
+
           const isChatRelatedError =
             lastOutgoingMessageTypeRef.current === "chat.send" ||
-            normalizedMessage.includes("chat") ||
-            normalizedMessage.includes("content") ||
-            normalizedMessage.includes("to_user_id") ||
-            normalizedMessage.includes("only active users can send messages");
+            CHAT_ERROR_FRAGMENTS.some((fragment) => normalizedMessage.includes(fragment));
 
           if (isChatRelatedError) {
             setChatError(message || "Failed to send chat message.");
@@ -1323,16 +1363,17 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
             break;
           }
 
-          const isWebRtcRelatedError =
-            lastOutgoingMessageTypeRef.current === "webrtc.offer" ||
-            lastOutgoingMessageTypeRef.current === "webrtc.answer" ||
-            lastOutgoingMessageTypeRef.current === "webrtc.ice_candidate" ||
-            normalizedMessage.includes("webrtc") ||
-            normalizedMessage.includes("sdp") ||
-            normalizedMessage.includes("candidate");
-          if (isWebRtcRelatedError) {
-            setLastError(message || "Failed to exchange WebRTC signaling data.");
-            lastOutgoingMessageTypeRef.current = null;
+          const isPendingHostControlAction =
+            lastOutgoingMessageTypeRef.current === "host.transfer" ||
+            lastOutgoingMessageTypeRef.current === "room.end";
+          const isHostControlError = HOST_CONTROL_ERROR_FRAGMENTS.some((fragment) =>
+            normalizedMessage.includes(fragment)
+          );
+          if (isPendingHostControlAction || isHostControlError) {
+            setLastError(message || "Failed to update host meeting controls.");
+            if (isPendingHostControlAction) {
+              lastOutgoingMessageTypeRef.current = null;
+            }
             break;
           }
 
