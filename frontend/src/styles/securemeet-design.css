@@ -1,0 +1,217 @@
+/* =========================================================================
+   SecureMeet Design System - Foundations
+   ========================================================================= */
+
+:root {
+  --sm-font-display: 'Inter Tight', -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
+  --sm-font-text:    'Inter Tight', -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+  --sm-font-mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --sm-type-display-2xl: 80px;
+  --sm-type-display-xl:  64px;
+  --sm-type-display-l:   48px;
+  --sm-type-display-m:   36px;
+  --sm-type-title-l:     28px;
+  --sm-type-title-m:     22px;
+  --sm-type-title-s:     18px;
+  --sm-type-body-l:      17px;
+  --sm-type-body-m:      15px;
+  --sm-type-body-s:      13px;
+  --sm-type-micro:       11px;
+
+  --sm-track-tight:   -0.035em;
+  --sm-track-display: -0.025em;
+  --sm-track-normal:  -0.011em;
+  --sm-track-eyebrow:  0.14em;
+
+  --sm-leading-tight: 1.05;
+  --sm-leading-snug:  1.2;
+  --sm-leading-body:  1.5;
+
+  /* Light palette */
+  --sm-bg:          #FBFBFD;
+  --sm-bg-elev-1:   #FFFFFF;
+  --sm-bg-elev-2:   rgba(255,255,255,0.72);
+  --sm-bg-sunken:   #F2F2F5;
+  --sm-bg-tint:     #EDEEF2;
+  --sm-overlay:     rgba(17, 18, 22, 0.32);
+
+  --sm-fg:          #0A0A0C;
+  --sm-fg-muted:    #5A5B63;
+  --sm-fg-subtle:   #8A8B94;
+  --sm-fg-inverse:  #FFFFFF;
+
+  --sm-line:        rgba(10, 10, 12, 0.08);
+  --sm-line-strong: rgba(10, 10, 12, 0.14);
+
+  --sm-accent:       #005CE6;
+  --sm-accent-press: #0047B8;
+  --sm-accent-soft:  #E6EEFB;
+  --sm-accent-ring:  rgba(0, 92, 230, 0.18);
+
+  --sm-success:     #1C8F5A;
+  --sm-success-soft:#E6F4EC;
+  --sm-warn:        #B4700A;
+  --sm-warn-soft:   #FBEFD7;
+  --sm-danger:      #C6301F;
+  --sm-danger-soft: #FBE6E3;
+
+  /* Dark meeting stage (always dark) */
+  --sm-stage:       #0A0A0C;
+  --sm-stage-elev:  #16171B;
+  --sm-stage-line:  rgba(255,255,255,0.08);
+  --sm-stage-fg:    #F5F5F7;
+  --sm-stage-muted: rgba(245,245,247,0.62);
+
+  --sm-shadow-xs: 0 1px 2px rgba(10,10,12,0.04), 0 1px 1px rgba(10,10,12,0.03);
+  --sm-shadow-sm: 0 2px 6px rgba(10,10,12,0.05), 0 1px 2px rgba(10,10,12,0.04);
+  --sm-shadow-md: 0 10px 24px -12px rgba(10,10,12,0.14), 0 2px 6px rgba(10,10,12,0.05);
+  --sm-shadow-lg: 0 24px 60px -24px rgba(10,10,12,0.24), 0 6px 16px -8px rgba(10,10,12,0.08);
+  --sm-shadow-xl: 0 48px 120px -40px rgba(10,10,12,0.32), 0 12px 28px -12px rgba(10,10,12,0.12);
+
+  --sm-radius-xs:  6px;
+  --sm-radius-sm:  10px;
+  --sm-radius-md:  14px;
+  --sm-radius-lg:  20px;
+  --sm-radius-xl:  28px;
+  --sm-radius-2xl: 36px;
+  --sm-radius-pill: 999px;
+
+  --sm-ease-standard: cubic-bezier(0.32, 0.72, 0, 1);
+  --sm-ease-emphasized: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --sm-dur-fast: 140ms;
+  --sm-dur-base: 220ms;
+  --sm-dur-slow: 360ms;
+
+  --sm-blur-sm: saturate(180%) blur(10px);
+  --sm-blur-md: saturate(180%) blur(20px);
+}
+
+/* ---------- Global root body ---------- */
+html, body {
+  background: var(--sm-bg);
+  color: var(--sm-fg);
+}
+body {
+  font-family: var(--sm-font-text);
+  font-feature-settings: "ss01","cv11","kern";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* ---------- Semantic type classes ---------- */
+.sm-h0 {
+  font-family: var(--sm-font-display);
+  font-size: var(--sm-type-display-2xl);
+  line-height: var(--sm-leading-tight);
+  letter-spacing: var(--sm-track-tight);
+  font-weight: 600;
+}
+.sm-h1 {
+  font-family: var(--sm-font-display);
+  font-size: var(--sm-type-display-xl);
+  line-height: var(--sm-leading-tight);
+  letter-spacing: var(--sm-track-tight);
+  font-weight: 600;
+}
+.sm-h2 {
+  font-family: var(--sm-font-display);
+  font-size: var(--sm-type-display-l);
+  line-height: var(--sm-leading-snug);
+  letter-spacing: var(--sm-track-display);
+  font-weight: 600;
+}
+.sm-h3 {
+  font-family: var(--sm-font-display);
+  font-size: var(--sm-type-display-m);
+  line-height: var(--sm-leading-snug);
+  letter-spacing: var(--sm-track-display);
+  font-weight: 600;
+}
+.sm-h4 {
+  font-size: var(--sm-type-title-l);
+  line-height: 1.22;
+  letter-spacing: var(--sm-track-normal);
+  font-weight: 600;
+}
+.sm-eyebrow {
+  font-size: var(--sm-type-micro);
+  font-weight: 600;
+  letter-spacing: var(--sm-track-eyebrow);
+  text-transform: uppercase;
+  color: var(--sm-fg-subtle);
+}
+.sm-mono {
+  font-family: var(--sm-font-mono);
+  font-feature-settings: "zero","ss01";
+}
+
+/* ---------- Inputs ---------- */
+.sm-input {
+  height: 44px;
+  padding: 0 14px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: inset 0 0 0 1px var(--sm-line);
+  color: var(--sm-fg);
+  font: inherit;
+  font-size: 14px;
+  font-family: var(--sm-font-text);
+  outline: none;
+  transition: box-shadow 220ms var(--sm-ease-standard);
+  width: 100%;
+  border: 0;
+}
+.sm-input::placeholder {
+  color: var(--sm-fg-subtle);
+}
+.sm-input:focus {
+  box-shadow: inset 0 0 0 1.5px var(--sm-accent), 0 0 0 4px var(--sm-accent-ring);
+}
+.sm-input-error {
+  box-shadow: inset 0 0 0 1.5px var(--sm-danger);
+}
+.sm-input-error:focus {
+  box-shadow: inset 0 0 0 1.5px var(--sm-danger), 0 0 0 4px rgba(198,48,31,0.18);
+}
+.sm-input-dark {
+  height: 40px;
+  padding: 0 14px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.04);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
+  color: var(--sm-stage-fg);
+  font: inherit;
+  font-size: 13.5px;
+  font-family: var(--sm-font-text);
+  outline: none;
+  border: 0;
+  width: 100%;
+  transition: box-shadow 220ms var(--sm-ease-standard);
+}
+.sm-input-dark::placeholder {
+  color: var(--sm-stage-muted);
+}
+.sm-input-dark:focus {
+  box-shadow: inset 0 0 0 1.5px var(--sm-accent), 0 0 0 4px var(--sm-accent-ring);
+}
+
+/* ---------- Field label ---------- */
+.sm-label {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--sm-fg-muted);
+  display: block;
+  margin-bottom: 6px;
+}
+
+/* ---------- Focus-visible globally ---------- */
+.sm-focus-ring:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px var(--sm-accent-ring);
+}
+
+/* ---------- Press motion ---------- */
+.sm-press { transition: transform var(--sm-dur-fast) var(--sm-ease-standard); }
+.sm-press:active { transform: scale(0.98); }
