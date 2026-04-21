@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
+import { SmBadge, SmButton, SmField, SmIcon, SmLogo, SmToggle } from "../components/sm";
 import { useAuth } from "../hooks/useAuth";
 import { post } from "../lib/apiClient";
 import { clearRoomEntryPreferences, saveRoomEntryPreferences } from "../lib/roomEntryPreferences";
@@ -19,34 +20,89 @@ const dateFormatter = new Intl.DateTimeFormat(undefined, {
   weekday: "long",
   month: "long",
   day: "numeric",
-  year: "numeric",
 });
+
+const greetingForHour = (hour: number): string => {
+  if (hour < 5) return "Working late";
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+  return "Good evening";
+};
 
 type ActionTileProps = {
   title: string;
   description: string;
+  icon: "plus" | "arrow";
+  accent?: boolean;
   onClick: () => void;
   disabled?: boolean;
-  children: ReactNode;
+  loading?: boolean;
 };
 
-const ActionTile = ({ title, description, onClick, disabled, children }: ActionTileProps) => (
+const ActionTile = ({ title, description, icon, accent, onClick, disabled, loading }: ActionTileProps) => (
   <button
     type="button"
     onClick={onClick}
     disabled={disabled}
-    className="group flex min-h-48 w-full flex-col items-start justify-between rounded-3xl border border-slate-200 bg-white/90 p-6 text-left shadow-[0_20px_55px_-35px_rgba(15,23,42,0.4)] transition duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_25px_55px_-30px_rgba(15,23,42,0.45)] disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-800 dark:bg-slate-900/90 dark:hover:border-slate-700"
+    className="sm-press"
+    style={{
+      all: "unset",
+      cursor: disabled ? "not-allowed" : "pointer",
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "flex-start",
+      justifyContent: "space-between",
+      gap: 28,
+      minHeight: 208,
+      padding: 28,
+      borderRadius: 28,
+      background: accent ? "var(--sm-fg)" : "#fff",
+      color: accent ? "#F5F5F7" : "var(--sm-fg)",
+      boxShadow: accent
+        ? "var(--sm-shadow-lg), inset 0 1px 0 rgba(255,255,255,0.08)"
+        : "inset 0 0 0 1px var(--sm-line), var(--sm-shadow-md)",
+      transition: "all 320ms var(--sm-ease-standard)",
+      opacity: disabled ? 0.6 : 1,
+    }}
   >
-    <span className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
-      {children}
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: 48,
+        height: 48,
+        borderRadius: 16,
+        background: accent ? "rgba(255,255,255,0.12)" : "var(--sm-bg-tint)",
+        color: accent ? "#F5F5F7" : "var(--sm-fg)",
+      }}
+    >
+      <SmIcon name={icon} size={20} strokeWidth={1.8} />
     </span>
     <div>
-      <h2 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">{title}</h2>
-      <p className="mt-1.5 text-sm leading-6 text-slate-600 dark:text-slate-300">{description}</p>
+      <h2
+        style={{
+          margin: 0,
+          fontFamily: "var(--sm-font-display)",
+          fontSize: 26,
+          fontWeight: 600,
+          letterSpacing: "-0.02em",
+        }}
+      >
+        {loading ? "Creating…" : title}
+      </h2>
+      <p
+        style={{
+          margin: "6px 0 0",
+          fontSize: 14.5,
+          lineHeight: 1.5,
+          color: accent ? "rgba(245,245,247,0.7)" : "var(--sm-fg-muted)",
+          maxWidth: 320,
+        }}
+      >
+        {description}
+      </p>
     </div>
-    <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400 transition group-hover:text-slate-600 dark:text-slate-500 dark:group-hover:text-slate-300">
-      Continue
-    </span>
   </button>
 );
 
@@ -59,58 +115,64 @@ type ModalShellProps = {
 
 const ModalShell = ({ title, description, onClose, children }: ModalShellProps) => (
   <div
-    className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm"
     onClick={onClose}
+    style={{
+      position: "fixed",
+      inset: 0,
+      zIndex: 50,
+      background: "var(--sm-overlay)",
+      backdropFilter: "var(--sm-blur-sm)",
+      WebkitBackdropFilter: "var(--sm-blur-sm)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 20,
+    }}
   >
     <div
       role="dialog"
       aria-modal="true"
-      className="w-full max-w-xl rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_36px_80px_-42px_rgba(15,23,42,0.55)] dark:border-slate-700 dark:bg-slate-900"
       onClick={(event) => event.stopPropagation()}
+      style={{
+        width: "100%",
+        maxWidth: 520,
+        background: "#fff",
+        borderRadius: 28,
+        padding: 32,
+        boxShadow: "var(--sm-shadow-xl)",
+      }}
     >
-      <header className="space-y-2">
-        <h2 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">{title}</h2>
-        <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">{description}</p>
+      <header style={{ marginBottom: 24 }}>
+        <h2
+          className="sm-h2"
+          style={{ margin: 0, fontSize: 26, letterSpacing: "-0.02em" }}
+        >
+          {title}
+        </h2>
+        <p
+          style={{
+            margin: "6px 0 0",
+            fontSize: 14.5,
+            lineHeight: 1.5,
+            color: "var(--sm-fg-muted)",
+          }}
+        >
+          {description}
+        </p>
       </header>
-      <div className="mt-6">{children}</div>
+      {children}
     </div>
   </div>
 );
 
-type PreferenceToggleProps = {
-  label: string;
-  description: string;
-  enabled: boolean;
-  onToggle: (nextValue: boolean) => void;
+const credentialCardStyle: React.CSSProperties = {
+  borderRadius: 20,
+  background: "var(--sm-bg-sunken)",
+  padding: 16,
+  display: "flex",
+  flexDirection: "column",
+  gap: 6,
 };
-
-const PreferenceToggle = ({ label, description, enabled, onToggle }: PreferenceToggleProps) => (
-  <button
-    type="button"
-    onClick={() => onToggle(!enabled)}
-    className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left transition ${
-      enabled
-        ? "border-emerald-200 bg-emerald-50/80 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300"
-        : "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-    }`}
-  >
-    <span>
-      <span className="block text-sm font-semibold">{label}</span>
-      <span className="block text-xs opacity-80">{description}</span>
-    </span>
-    <span
-      className={`inline-flex h-6 w-11 rounded-full p-1 transition ${
-        enabled ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-600"
-      }`}
-    >
-      <span
-        className={`h-4 w-4 rounded-full bg-white transition ${
-          enabled ? "translate-x-5" : "translate-x-0"
-        }`}
-      />
-    </span>
-  </button>
-);
 
 function DashboardPage() {
   const { token, user, clearToken } = useAuth();
@@ -138,7 +200,10 @@ function DashboardPage() {
   const [copyFeedback, setCopyFeedback] = useState("");
 
   const defaultDisplayName = useMemo(() => user?.username?.trim() ?? "", [user?.username]);
-  const greeting = user?.username ? `Welcome back, ${user.username}` : "Welcome back";
+  const greeting = useMemo(() => {
+    const salutation = greetingForHour(now.getHours());
+    return user?.username ? `${salutation}, ${user.username}` : salutation;
+  }, [now, user?.username]);
 
   useEffect(() => {
     const timerId = window.setInterval(() => {
@@ -386,150 +451,248 @@ function DashboardPage() {
 
   return (
     <>
-      <div className="min-h-screen bg-[radial-gradient(circle_at_20%_0%,rgba(203,213,225,0.5),transparent_45%),radial-gradient(circle_at_80%_100%,rgba(191,219,254,0.5),transparent_45%)] dark:bg-[radial-gradient(circle_at_20%_0%,rgba(30,41,59,0.5),transparent_40%),radial-gradient(circle_at_80%_100%,rgba(30,58,138,0.25),transparent_45%)]">
-        <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-4 py-6 sm:px-8 sm:py-8">
-          <header className="flex items-center justify-between rounded-2xl border border-slate-200/80 bg-white/85 px-5 py-3 shadow-sm backdrop-blur dark:border-slate-700 dark:bg-slate-900/85">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
-                SecureMeet
-              </p>
-              <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-300">Meeting hub</p>
-            </div>
-            <div className="flex items-center gap-3">
-              <p className="hidden text-sm font-medium text-slate-700 sm:block dark:text-slate-200">{greeting}</p>
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 transition duration-200 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-              >
-                Logout
-              </button>
+      <div style={{ minHeight: "100vh", background: "var(--sm-bg)" }}>
+        <div
+          style={{
+            maxWidth: 1120,
+            margin: "0 auto",
+            padding: "24px 28px",
+            display: "flex",
+            flexDirection: "column",
+            minHeight: "100vh",
+          }}
+        >
+          <header
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "12px 18px",
+              borderRadius: 999,
+              background: "var(--sm-bg-elev-2)",
+              backdropFilter: "var(--sm-blur-md)",
+              WebkitBackdropFilter: "var(--sm-blur-md)",
+              boxShadow: "inset 0 0 0 1px var(--sm-line)",
+            }}
+          >
+            <SmLogo size={24} withWordmark />
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              {user?.username ? (
+                <span
+                  style={{
+                    fontSize: 13.5,
+                    color: "var(--sm-fg-muted)",
+                    letterSpacing: "-0.005em",
+                  }}
+                  className="sm-dashboard-username"
+                >
+                  {user.username}
+                </span>
+              ) : null}
+              <SmButton variant="secondary" size="sm" icon="logout" onClick={handleLogout}>
+                Sign out
+              </SmButton>
             </div>
           </header>
 
-          <main className="flex flex-1 items-center justify-center py-8">
-            <section className="w-full max-w-3xl text-center">
-              <p className="text-sm font-medium uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
-                Today
-              </p>
-              <h1 className="mt-4 text-6xl font-semibold tracking-tight text-slate-900 sm:text-7xl dark:text-slate-100">
-                {timeFormatter.format(now)}
+          <main
+            style={{
+              flex: 1,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "56px 0",
+            }}
+          >
+            <section style={{ width: "100%", maxWidth: 760 }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 10,
+                  marginBottom: 18,
+                }}
+              >
+                <SmBadge tone="info" dot>
+                  {dateFormatter.format(now)}
+                </SmBadge>
+              </div>
+              <h1
+                className="sm-h1"
+                style={{
+                  margin: 0,
+                  textAlign: "center",
+                  fontSize: "clamp(44px, 7vw, 72px)",
+                  letterSpacing: "-0.035em",
+                }}
+              >
+                {greeting}.
               </h1>
-              <p className="mt-3 text-lg text-slate-600 dark:text-slate-300">{dateFormatter.format(now)}</p>
+              <p
+                style={{
+                  margin: "12px auto 0",
+                  textAlign: "center",
+                  fontSize: 18,
+                  lineHeight: 1.5,
+                  color: "var(--sm-fg-muted)",
+                  maxWidth: 520,
+                }}
+              >
+                It's {timeFormatter.format(now)}. Start a new room or join one - your meetings
+                stay private either way.
+              </p>
 
               {createError ? (
-                <p className="mx-auto mt-6 max-w-xl rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-left text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-300">
+                <div
+                  role="alert"
+                  style={{
+                    margin: "24px auto 0",
+                    maxWidth: 520,
+                    padding: "12px 14px",
+                    borderRadius: 14,
+                    background: "var(--sm-danger-soft)",
+                    color: "var(--sm-danger)",
+                    fontSize: 13.5,
+                    textAlign: "left",
+                  }}
+                >
                   {createError}
-                </p>
+                </div>
               ) : null}
 
-              <div className="mt-10 grid gap-4 sm:grid-cols-2">
+              <div
+                style={{
+                  marginTop: 40,
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+                  gap: 16,
+                }}
+              >
                 <ActionTile
                   title="New meeting"
-                  description="Create a private room and open your pre-join setup."
+                  description="Generate a private room with a unique code. Share access when you're ready."
+                  icon="plus"
+                  accent
                   onClick={handleCreateRoom}
                   disabled={createLoading}
-                >
-                  {createLoading ? "…" : "+"}
-                </ActionTile>
+                  loading={createLoading}
+                />
                 <ActionTile
-                  title="Join"
-                  description="Enter room credentials and choose your pre-join preferences."
+                  title="Join meeting"
+                  description="Enter a room code and password to step into the lobby."
+                  icon="arrow"
                   onClick={openJoinModal}
-                >
-                  →
-                </ActionTile>
+                />
               </div>
             </section>
           </main>
+
+          <footer
+            style={{
+              marginTop: "auto",
+              padding: "14px 4px 8px",
+              fontSize: 12.5,
+              color: "var(--sm-fg-subtle)",
+              display: "flex",
+              justifyContent: "space-between",
+            }}
+          >
+            <span>End-to-end encrypted · Rooms expire in 2 hours</span>
+            <span>SecureMeet</span>
+          </footer>
         </div>
       </div>
 
       {joinModalOpen ? (
-        <ModalShell title="Join meeting" description="Enter room credentials and pre-join settings." onClose={closeJoinModal}>
-          <form onSubmit={handleJoinRoom} className="space-y-4">
-            <div className="space-y-2">
-              <label htmlFor="join_room_code" className="block text-sm font-medium text-slate-700 dark:text-slate-300">
-                Room code
-              </label>
-              <input
-                id="join_room_code"
-                type="text"
-                autoComplete="off"
-                value={joinRoomCode}
-                onChange={(event) => setJoinRoomCode(event.target.value)}
-                required
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-300 focus:bg-white focus:ring-4 focus:ring-slate-200/70 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-slate-700/60"
-              />
-            </div>
+        <ModalShell
+          title="Join a meeting"
+          description="Enter the room credentials and pick your pre-join settings."
+          onClose={closeJoinModal}
+        >
+          <form
+            onSubmit={handleJoinRoom}
+            style={{ display: "flex", flexDirection: "column", gap: 16 }}
+          >
+            <SmField
+              id="join_room_code"
+              label="Room code"
+              autoComplete="off"
+              value={joinRoomCode}
+              onChange={(event) => setJoinRoomCode(event.target.value)}
+              placeholder="e.g. 482-A3K"
+              required
+            />
+            <SmField
+              id="join_room_password"
+              type="password"
+              label="Room password"
+              autoComplete="current-password"
+              value={joinRoomPassword}
+              onChange={(event) => setJoinRoomPassword(event.target.value)}
+              placeholder="Shared by host"
+              required
+            />
+            <SmField
+              id="join_display_name"
+              label="Nickname"
+              value={joinDisplayName}
+              onChange={(event) => setJoinDisplayName(event.target.value)}
+              placeholder="How others see you"
+              maxLength={64}
+              required
+            />
 
-            <div className="space-y-2">
-              <label htmlFor="join_room_password" className="block text-sm font-medium text-slate-700 dark:text-slate-300">
-                Room password
-              </label>
-              <input
-                id="join_room_password"
-                type="password"
-                autoComplete="current-password"
-                value={joinRoomPassword}
-                onChange={(event) => setJoinRoomPassword(event.target.value)}
-                required
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-300 focus:bg-white focus:ring-4 focus:ring-slate-200/70 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-slate-700/60"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label htmlFor="join_display_name" className="block text-sm font-medium text-slate-700 dark:text-slate-300">
-                Nickname
-              </label>
-              <input
-                id="join_display_name"
-                type="text"
-                value={joinDisplayName}
-                onChange={(event) => setJoinDisplayName(event.target.value)}
-                required
-                maxLength={64}
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-300 focus:bg-white focus:ring-4 focus:ring-slate-200/70 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-slate-700/60"
-              />
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <PreferenceToggle
+            <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr" }}>
+              <SmToggle
                 label="Microphone"
                 description="Connect to audio"
-                enabled={joinAudioEnabled}
-                onToggle={setJoinAudioEnabled}
+                checked={joinAudioEnabled}
+                onChange={setJoinAudioEnabled}
               />
-              <PreferenceToggle
+              <SmToggle
                 label="Camera"
                 description="Start with video"
-                enabled={joinVideoEnabled}
-                onToggle={setJoinVideoEnabled}
+                checked={joinVideoEnabled}
+                onChange={setJoinVideoEnabled}
               />
             </div>
 
             {joinError ? (
-              <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-300">
+              <div
+                role="alert"
+                style={{
+                  padding: "12px 14px",
+                  borderRadius: 14,
+                  background: "var(--sm-danger-soft)",
+                  color: "var(--sm-danger)",
+                  fontSize: 13.5,
+                }}
+              >
                 {joinError}
-              </p>
+              </div>
             ) : null}
 
-            <div className="flex justify-end gap-3 pt-2">
-              <button
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, paddingTop: 4 }}>
+              <SmButton
                 type="button"
+                variant="secondary"
+                size="md"
                 onClick={closeJoinModal}
-                className="inline-flex h-11 items-center justify-center rounded-xl border border-slate-300 bg-white px-5 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                 disabled={joinLoading}
               >
                 Cancel
-              </button>
-              <button
+              </SmButton>
+              <SmButton
                 type="submit"
+                variant="primary"
+                size="md"
                 disabled={joinLoading}
-                className="inline-flex h-11 items-center justify-center rounded-xl bg-black px-5 text-sm font-medium text-white shadow-sm transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-blue-900 dark:hover:bg-blue-800"
+                icon="arrow"
+                iconTrailing
               >
-                {joinLoading ? "Joining..." : "Join"}
-              </button>
+                {joinLoading ? "Joining…" : "Join"}
+              </SmButton>
             </div>
           </form>
         </ModalShell>
@@ -538,97 +701,169 @@ function DashboardPage() {
       {createdRoom ? (
         <ModalShell
           title="Meeting created"
-          description="Share the room code and password now. The password is shown only from this create response."
+          description="Share the code and password now - the password is only shown here."
           onClose={closeHostModal}
         >
-          <form onSubmit={handleStartMeeting} className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800">
-                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Room code</p>
-                <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">{createdRoom.room_code}</p>
+          <form
+            onSubmit={handleStartMeeting}
+            style={{ display: "flex", flexDirection: "column", gap: 16 }}
+          >
+            <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr" }}>
+              <div style={credentialCardStyle}>
+                <span className="sm-eyebrow" style={{ fontSize: 10.5 }}>
+                  Room code
+                </span>
+                <span
+                  className="sm-mono"
+                  style={{ fontSize: 16, fontWeight: 600, color: "var(--sm-fg)" }}
+                >
+                  {createdRoom.room_code}
+                </span>
                 <button
                   type="button"
                   onClick={() => copyValue("Room code", createdRoom.room_code)}
-                  className="mt-2 text-xs font-medium text-slate-600 underline decoration-slate-300 underline-offset-4 hover:decoration-slate-500 dark:text-slate-300 dark:decoration-slate-600"
+                  className="sm-press"
+                  style={{
+                    marginTop: 6,
+                    border: 0,
+                    background: "transparent",
+                    color: "var(--sm-accent)",
+                    fontSize: 12.5,
+                    fontWeight: 500,
+                    cursor: "pointer",
+                    padding: 0,
+                    textAlign: "left",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                  }}
                 >
-                  Copy room code
+                  <SmIcon name="copy" size={13} /> Copy
                 </button>
               </div>
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800">
-                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Room password</p>
-                <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">{createdRoom.room_password}</p>
+              <div style={credentialCardStyle}>
+                <span className="sm-eyebrow" style={{ fontSize: 10.5 }}>
+                  Password
+                </span>
+                <span
+                  className="sm-mono"
+                  style={{ fontSize: 16, fontWeight: 600, color: "var(--sm-fg)" }}
+                >
+                  {createdRoom.room_password}
+                </span>
                 <button
                   type="button"
                   onClick={() => copyValue("Room password", createdRoom.room_password)}
-                  className="mt-2 text-xs font-medium text-slate-600 underline decoration-slate-300 underline-offset-4 hover:decoration-slate-500 dark:text-slate-300 dark:decoration-slate-600"
+                  className="sm-press"
+                  style={{
+                    marginTop: 6,
+                    border: 0,
+                    background: "transparent",
+                    color: "var(--sm-accent)",
+                    fontSize: 12.5,
+                    fontWeight: 500,
+                    cursor: "pointer",
+                    padding: 0,
+                    textAlign: "left",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                  }}
                 >
-                  Copy room password
+                  <SmIcon name="copy" size={13} /> Copy
                 </button>
               </div>
             </div>
 
-            <p className="text-xs text-amber-700 dark:text-amber-300">
-              Expires at {new Date(createdRoom.expires_at).toLocaleString()}
+            <p
+              style={{
+                margin: 0,
+                fontSize: 12.5,
+                color: "var(--sm-warn)",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <SmIcon name="clock" size={13} />
+              Expires {new Date(createdRoom.expires_at).toLocaleString()}
             </p>
 
             {copyFeedback ? (
-              <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/40 dark:text-emerald-300">
+              <div
+                role="status"
+                style={{
+                  padding: "10px 14px",
+                  borderRadius: 12,
+                  background: "var(--sm-success-soft)",
+                  color: "var(--sm-success)",
+                  fontSize: 12.5,
+                }}
+              >
                 {copyFeedback}
-              </p>
+              </div>
             ) : null}
 
-            <div className="space-y-2">
-              <label htmlFor="host_display_name" className="block text-sm font-medium text-slate-700 dark:text-slate-300">
-                Nickname
-              </label>
-              <input
-                id="host_display_name"
-                type="text"
-                value={hostDisplayName}
-                onChange={(event) => setHostDisplayName(event.target.value)}
-                required
-                maxLength={64}
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-300 focus:bg-white focus:ring-4 focus:ring-slate-200/70 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-slate-700/60"
-              />
-            </div>
+            <SmField
+              id="host_display_name"
+              label="Nickname"
+              value={hostDisplayName}
+              onChange={(event) => setHostDisplayName(event.target.value)}
+              placeholder="How attendees see you"
+              maxLength={64}
+              required
+            />
 
-            <div className="grid gap-3 sm:grid-cols-2">
-              <PreferenceToggle
+            <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr" }}>
+              <SmToggle
                 label="Microphone"
                 description="Connect to audio"
-                enabled={hostAudioEnabled}
-                onToggle={setHostAudioEnabled}
+                checked={hostAudioEnabled}
+                onChange={setHostAudioEnabled}
               />
-              <PreferenceToggle
+              <SmToggle
                 label="Camera"
                 description="Start with video"
-                enabled={hostVideoEnabled}
-                onToggle={setHostVideoEnabled}
+                checked={hostVideoEnabled}
+                onChange={setHostVideoEnabled}
               />
             </div>
 
             {hostError ? (
-              <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-300">
+              <div
+                role="alert"
+                style={{
+                  padding: "12px 14px",
+                  borderRadius: 14,
+                  background: "var(--sm-danger-soft)",
+                  color: "var(--sm-danger)",
+                  fontSize: 13.5,
+                }}
+              >
                 {hostError}
-              </p>
+              </div>
             ) : null}
 
-            <div className="flex justify-end gap-3 pt-2">
-              <button
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, paddingTop: 4 }}>
+              <SmButton
                 type="button"
+                variant="secondary"
+                size="md"
                 onClick={closeHostModal}
-                className="inline-flex h-11 items-center justify-center rounded-xl border border-slate-300 bg-white px-5 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                 disabled={hostStarting}
               >
                 Cancel
-              </button>
-              <button
+              </SmButton>
+              <SmButton
                 type="submit"
+                variant="primary"
+                size="md"
                 disabled={hostStarting}
-                className="inline-flex h-11 items-center justify-center rounded-xl bg-black px-5 text-sm font-medium text-white shadow-sm transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-blue-900 dark:hover:bg-blue-800"
+                icon="arrow"
+                iconTrailing
               >
-                {hostStarting ? "Starting..." : "Start meeting"}
-              </button>
+                {hostStarting ? "Starting…" : "Start meeting"}
+              </SmButton>
             </div>
           </form>
         </ModalShell>
