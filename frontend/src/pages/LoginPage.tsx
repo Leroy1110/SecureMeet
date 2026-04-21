@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import AuthCardLayout from "../components/layout/AuthCardLayout";
+import { SmButton, SmField } from "../components/sm";
 import { useAuth } from "../hooks/useAuth";
 import { post } from "../lib/apiClient";
 import type { LoginRequest, TokenResponse } from "../lib/types";
@@ -48,68 +49,70 @@ function LoginPage() {
 
   return (
     <AuthCardLayout
-      title="Sign in to SecureMeet"
-      description="Use your account credentials to continue."
+      title="Welcome back"
+      description="Sign in to your SecureMeet account to start or join a private meeting."
       footer={
         <>
           New to SecureMeet?{" "}
           <Link
             to="/register"
-            className="font-medium text-slate-900 underline decoration-slate-300 underline-offset-4 hover:decoration-slate-500 dark:text-slate-100 dark:decoration-slate-600 dark:hover:decoration-slate-400"
+            style={{
+              color: "var(--sm-accent)",
+              fontWeight: 500,
+              textDecoration: "none",
+            }}
           >
             Create an account
           </Link>
         </>
       }
     >
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <div>
-          <label
-            htmlFor="email"
-            className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200"
-          >
-            Email
-          </label>
-          <input
-            id="email"
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            required
-            className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 shadow-sm outline-none transition duration-200 placeholder:text-slate-400 focus:border-slate-300 focus:bg-white focus:ring-4 focus:ring-slate-200/70 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:bg-slate-800 dark:focus:ring-slate-700/60"
-          />
-        </div>
+      <form
+        onSubmit={handleSubmit}
+        style={{ display: "flex", flexDirection: "column", gap: 18 }}
+      >
+        <SmField
+          id="email"
+          type="email"
+          label="Email"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+          placeholder="you@company.com"
+          autoComplete="email"
+          required
+        />
 
-        <div>
-          <label
-            htmlFor="password"
-            className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200"
-          >
-            Password
-          </label>
-          <input
-            id="password"
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            required
-            className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 shadow-sm outline-none transition duration-200 placeholder:text-slate-400 focus:border-slate-300 focus:bg-white focus:ring-4 focus:ring-slate-200/70 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:bg-slate-800 dark:focus:ring-slate-700/60"
-          />
-        </div>
+        <SmField
+          id="password"
+          type="password"
+          label="Password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          placeholder="••••••••"
+          autoComplete="current-password"
+          required
+        />
 
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full rounded-lg bg-black px-4 py-3 text-sm font-medium text-white shadow-sm transition duration-200 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-white disabled:hover:bg-gray-300 !disabled:opacity-100 dark:bg-blue-900 dark:hover:bg-blue-800 dark:disabled:bg-blue-900 dark:disabled:text-white"
-        >
-          {loading ? "Logging in..." : "Login"}
-        </button>
+        <SmButton type="submit" variant="primary" size="lg" fullWidth disabled={loading}>
+          {loading ? "Signing in…" : "Sign in"}
+        </SmButton>
       </form>
 
       {error ? (
-        <p className="mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-400">
+        <div
+          role="alert"
+          style={{
+            marginTop: 18,
+            borderRadius: 14,
+            padding: "12px 14px",
+            background: "var(--sm-danger-soft)",
+            color: "var(--sm-danger)",
+            fontSize: 13.5,
+            border: "1px solid rgba(222, 58, 58, 0.12)",
+          }}
+        >
           {error}
-        </p>
+        </div>
       ) : null}
     </AuthCardLayout>
   );
