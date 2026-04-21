@@ -1,3 +1,5 @@
+import { SmIcon, type SmIconName } from "../sm";
+
 type BottomControlsProps = {
   activeCount: number;
   waitingCount: number;
@@ -9,39 +11,110 @@ type BottomControlsProps = {
 };
 
 type ControlButtonProps = {
+  icon: SmIconName;
   label: string;
   onClick?: () => void;
-  tone?: "default" | "danger";
+  tone?: "default" | "muted" | "danger";
   disabled?: boolean;
   badge?: number;
   title?: string;
 };
 
 const ControlButton = ({
+  icon,
   label,
   onClick,
   tone = "default",
   disabled = false,
   badge,
   title,
-}: ControlButtonProps) => (
+}: ControlButtonProps) => {
+  const base: React.CSSProperties = {
+    position: "relative",
+    width: 48,
+    height: 48,
+    borderRadius: 999,
+    border: 0,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: disabled ? "not-allowed" : "pointer",
+    color: "#F5F5F7",
+    background: "rgba(255,255,255,0.08)",
+    transition: "background 220ms var(--sm-ease-standard), transform 140ms var(--sm-ease-standard)",
+    opacity: disabled ? 0.45 : 1,
+  };
+
+  const toneStyle: React.CSSProperties =
+    tone === "danger"
+      ? { background: "var(--sm-danger)", color: "#fff" }
+      : tone === "muted"
+      ? { background: "rgba(255,255,255,0.04)" }
+      : {};
+
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={title ?? label}
+      onClick={onClick}
+      disabled={disabled}
+      className="sm-press"
+      style={{ ...base, ...toneStyle }}
+    >
+      <SmIcon name={icon} size={18} />
+      {typeof badge === "number" && badge > 0 ? (
+        <span
+          style={{
+            position: "absolute",
+            top: 2,
+            right: 2,
+            minWidth: 18,
+            height: 18,
+            padding: "0 5px",
+            borderRadius: 999,
+            background: "var(--sm-accent)",
+            color: "#fff",
+            fontSize: 10.5,
+            fontWeight: 600,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            boxShadow: "0 0 0 2px rgba(22,23,27,0.85)",
+            fontFamily: "var(--sm-font-mono)",
+          }}
+        >
+          {badge > 99 ? "99+" : badge}
+        </span>
+      ) : null}
+    </button>
+  );
+};
+
+const EndButton = ({ onClick }: { onClick: () => void }) => (
   <button
     type="button"
-    title={title}
     onClick={onClick}
-    disabled={disabled}
-    className={`relative inline-flex h-11 items-center justify-center rounded-xl border px-4 text-sm font-medium transition ${
-      tone === "danger"
-        ? "border-red-200 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/60"
-        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-    } disabled:cursor-not-allowed disabled:opacity-60`}
+    className="sm-press"
+    style={{
+      height: 48,
+      padding: "0 22px",
+      borderRadius: 999,
+      border: 0,
+      background: "var(--sm-danger)",
+      color: "#fff",
+      fontSize: 14,
+      fontWeight: 600,
+      letterSpacing: "-0.01em",
+      cursor: "pointer",
+      display: "inline-flex",
+      alignItems: "center",
+      gap: 8,
+      fontFamily: "var(--sm-font-text)",
+    }}
   >
-    {label}
-    {typeof badge === "number" ? (
-      <span className="absolute -right-1.5 -top-1.5 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-slate-900 px-1.5 text-[11px] font-semibold text-white dark:bg-slate-100 dark:text-slate-900">
-        {badge}
-      </span>
-    ) : null}
+    <SmIcon name="logout" size={16} />
+    Leave
   </button>
 );
 
@@ -55,27 +128,69 @@ const BottomControls = ({
   onLeave,
 }: BottomControlsProps) => {
   return (
-    <footer className="sticky bottom-4 z-30 mt-4 flex justify-center px-2">
-      <div className="flex w-full max-w-5xl flex-wrap items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-[0_20px_60px_-38px_rgba(15,23,42,0.7)] backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/95">
+    <footer
+      style={{
+        position: "sticky",
+        bottom: 20,
+        zIndex: 30,
+        display: "flex",
+        justifyContent: "center",
+        padding: "16px 8px 0",
+      }}
+    >
+      <div
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 8,
+          padding: 10,
+          borderRadius: 999,
+          background: "rgba(22,23,27,0.78)",
+          backdropFilter: "var(--sm-blur-md)",
+          WebkitBackdropFilter: "var(--sm-blur-md)",
+          border: "1px solid rgba(255,255,255,0.08)",
+          boxShadow: "var(--sm-shadow-lg)",
+        }}
+      >
         <ControlButton
+          icon="mic"
           label="Mute"
+          tone="muted"
           disabled
           title="Mute/unmute signaling is not available in V1"
         />
         <ControlButton
+          icon="video"
           label="Camera"
+          tone="muted"
           disabled
-          title="Camera toggle signaling is not available in V1"
+          title="Camera toggle is not available in V1"
         />
         <ControlButton
+          icon="screen"
           label="Share"
+          tone="muted"
           disabled
           title="Screen sharing is not available in V1"
         />
-        <ControlButton label="Active" badge={activeCount} onClick={onOpenActive} />
-        {isHost ? <ControlButton label="Waiting" badge={waitingCount} onClick={onOpenWaiting} /> : null}
-        <ControlButton label="Chat" onClick={onOpenChat} />
-        <ControlButton label="Leave" tone="danger" onClick={onLeave} />
+        <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.08)", margin: "0 4px" }} />
+        <ControlButton
+          icon="users"
+          label="Participants"
+          onClick={onOpenActive}
+          badge={activeCount}
+        />
+        {isHost ? (
+          <ControlButton
+            icon="sparkle"
+            label="Waiting room"
+            onClick={onOpenWaiting}
+            badge={waitingCount}
+          />
+        ) : null}
+        <ControlButton icon="chat" label="Chat" onClick={onOpenChat} />
+        <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.08)", margin: "0 4px" }} />
+        <EndButton onClick={onLeave} />
       </div>
     </footer>
   );

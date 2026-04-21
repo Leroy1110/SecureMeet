@@ -4,6 +4,7 @@ import {
   MESH_SOFT_PARTICIPANT_LIMIT,
   type MediaTopology,
 } from "../../lib/mediaTopology";
+import { SmBadge, SmIcon } from "../sm";
 import ParticipantTile from "./ParticipantTile";
 import type { LocalMediaUiState, MeshUiState, PeerTileState } from "./types";
 
@@ -33,22 +34,22 @@ const getPresenceUserLabel = (user: RoomPresenceUser): string => {
 };
 
 const localMediaDescriptionByState: Record<LocalMediaUiState, string> = {
-  disabled_by_preferences: "Media disabled",
-  requesting_permissions: "Preparing devices",
-  ready_audio_video: "Camera + mic ready",
+  disabled_by_preferences: "Media off",
+  requesting_permissions: "Preparing…",
+  ready_audio_video: "Cam + mic",
   ready_audio_only: "Audio only",
   ready_video_only: "Video only",
-  failed: "Local media failed",
-  not_started: "Waiting for room",
+  failed: "Media failed",
+  not_started: "Waiting",
 };
 
 const meshDescriptionByState: Record<MeshUiState, string> = {
   idle: "Idle",
-  waiting_for_peers: "Waiting for participants",
-  preparing_local_media: "Preparing local media",
+  waiting_for_peers: "Waiting",
+  preparing_local_media: "Preparing",
   connecting: "Connecting",
-  connected: "All peers connected",
-  partially_connected: "Partial connectivity",
+  connected: "Connected",
+  partially_connected: "Partial",
   failed: "Failed",
 };
 
@@ -56,7 +57,7 @@ const peerTileDescriptionByState: Record<PeerTileState, string> = {
   connecting: "Connecting",
   connected: "Connected",
   audio_only: "Audio only",
-  video_active: "Video live",
+  video_active: "Live",
   disconnected: "Disconnected",
   failed: "Failed",
 };
@@ -91,17 +92,10 @@ const derivePeerTileState = (
   return "connecting";
 };
 
-const getGridColumnsClass = (totalTiles: number): string => {
-  if (totalTiles <= 1) {
-    return "grid-cols-1";
-  }
-  if (totalTiles <= 2) {
-    return "grid-cols-1 sm:grid-cols-2";
-  }
-  if (totalTiles <= 4) {
-    return "grid-cols-1 sm:grid-cols-2";
-  }
-  return "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3";
+const getGridTemplate = (totalTiles: number): string => {
+  if (totalTiles <= 1) return "repeat(1, 1fr)";
+  if (totalTiles <= 4) return "repeat(auto-fit, minmax(280px, 1fr))";
+  return "repeat(auto-fit, minmax(220px, 1fr))";
 };
 
 const MeetingStage = ({
@@ -121,35 +115,91 @@ const MeetingStage = ({
   );
 
   const totalTiles = remoteParticipants.length + 1;
-  const gridColumnsClass = getGridColumnsClass(totalTiles);
+  const gridTemplate = getGridTemplate(totalTiles);
 
   const isMeshOverloaded =
-    mediaTopology === "mesh" &&
-    totalTiles > MESH_SOFT_PARTICIPANT_LIMIT;
+    mediaTopology === "mesh" && totalTiles > MESH_SOFT_PARTICIPANT_LIMIT;
 
   const topologyLabel = mediaTopology === "mesh" ? "Mesh" : "SFU";
 
+  const meshTone =
+    meshUiState === "connected"
+      ? "inverse-success"
+      : meshUiState === "failed"
+      ? "inverse-danger"
+      : "inverse-neutral";
+
   return (
-    <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.5)] dark:border-slate-800 dark:bg-slate-900 sm:p-5">
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <span className="rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
-          Local: {localMediaDescriptionByState[localMediaUiState]}
-        </span>
-        <span className="rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
-          {topologyLabel}: {meshDescriptionByState[meshUiState]}
-        </span>
-        <span className="rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
-          Participants: {totalTiles}
-        </span>
+    <section
+      style={{
+        background: "var(--sm-stage)",
+        borderRadius: 28,
+        padding: 20,
+        boxShadow:
+          "inset 0 0 0 1px rgba(255,255,255,0.06), var(--sm-shadow-xl)",
+        position: "relative",
+        overflow: "hidden",
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          pointerEvents: "none",
+          background:
+            "radial-gradient(60% 70% at 50% 0%, rgba(77,156,255,0.10), transparent 70%)",
+        }}
+      />
+
+      <div
+        style={{
+          position: "relative",
+          display: "flex",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: 8,
+          marginBottom: 16,
+        }}
+      >
+        <SmBadge tone="inverse-neutral">
+          {localMediaDescriptionByState[localMediaUiState]}
+        </SmBadge>
+        <SmBadge tone={meshTone} dot>
+          {topologyLabel} · {meshDescriptionByState[meshUiState]}
+        </SmBadge>
+        <SmBadge tone="inverse-neutral">
+          {totalTiles} participant{totalTiles === 1 ? "" : "s"}
+        </SmBadge>
       </div>
 
       {isMeshOverloaded ? (
-        <p className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
-          Mesh topology is best for up to {MESH_SOFT_PARTICIPANT_LIMIT} participants. With {totalTiles} participants in the room, video quality and bandwidth may degrade.
-        </p>
+        <div
+          style={{
+            position: "relative",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "10px 14px",
+            borderRadius: 14,
+            background: "rgba(180,112,10,0.18)",
+            color: "#F6C685",
+            fontSize: 12.5,
+            marginBottom: 16,
+          }}
+        >
+          <SmIcon name="shield" size={14} />
+          Mesh is optimized for up to {MESH_SOFT_PARTICIPANT_LIMIT} participants. With {totalTiles}, quality may degrade.
+        </div>
       ) : null}
 
-      <div className={`grid gap-3 ${gridColumnsClass}`}>
+      <div
+        style={{
+          position: "relative",
+          display: "grid",
+          gridTemplateColumns: gridTemplate,
+          gap: 12,
+        }}
+      >
         <ParticipantTile
           name={localDisplayName}
           label="You"
@@ -157,6 +207,7 @@ const MeetingStage = ({
           stream={localStream}
           showVideo={hasLocalVideoTrack}
           muted
+          accent
         />
 
         {remoteParticipants.map((user) => {
@@ -184,13 +235,21 @@ const MeetingStage = ({
             />
           );
         })}
-
-        {!hasLocalVideoTrack && !hasLocalAudioTrack && remoteParticipants.length === 0 ? (
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 sm:col-span-2">
-            Local preview is not publishing media right now. You can still stay connected to room presence and chat.
-          </div>
-        ) : null}
       </div>
+
+      {!hasLocalVideoTrack && !hasLocalAudioTrack && remoteParticipants.length === 0 ? (
+        <p
+          style={{
+            position: "relative",
+            marginTop: 14,
+            fontSize: 12.5,
+            color: "var(--sm-stage-muted)",
+            textAlign: "center",
+          }}
+        >
+          Local preview isn't publishing media. You're still connected to room presence and chat.
+        </p>
+      ) : null}
     </section>
   );
 };

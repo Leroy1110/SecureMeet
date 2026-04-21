@@ -1,5 +1,6 @@
 import { type Dispatch, type FormEvent, type SetStateAction } from "react";
 import { type ChatMessage, type ChatRecipientOption } from "../../hooks/useRoomSocket";
+import { SmButton, SmIcon } from "../sm";
 
 type ChatPanelProps = {
   chatMessages: ChatMessage[];
@@ -32,10 +33,10 @@ const getTargetLabel = (message: ChatMessage): string => {
   }
 
   if (message.to_display_name.trim()) {
-    return `Private to ${message.to_display_name}`;
+    return `→ ${message.to_display_name}`;
   }
 
-  return `Private to User ${message.to_user_id}`;
+  return `→ User ${message.to_user_id}`;
 };
 
 const ChatPanel = ({
@@ -50,73 +51,175 @@ const ChatPanel = ({
   setChatInput,
   onSubmit,
 }: ChatPanelProps) => {
+  const inputsDisabled = !canSendChat || !isSocketOpen;
+
   return (
-    <div className="space-y-4">
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+        height: "100%",
+        minHeight: 0,
+      }}
+    >
       {chatError ? (
-        <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/50 dark:text-red-300">
+        <div
+          role="alert"
+          style={{
+            padding: "10px 12px",
+            borderRadius: 12,
+            background: "var(--sm-danger-soft)",
+            color: "var(--sm-danger)",
+            fontSize: 13,
+          }}
+        >
           {chatError}
-        </p>
+        </div>
       ) : null}
 
       {!canSendChat ? (
-        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/50 dark:text-amber-300">
+        <div
+          style={{
+            padding: "10px 12px",
+            borderRadius: 12,
+            background: "var(--sm-warn-soft)",
+            color: "var(--sm-warn)",
+            fontSize: 13,
+          }}
+        >
           You can send messages once your room session is active.
-        </p>
+        </div>
       ) : null}
 
-      <div className="max-h-[45vh] space-y-2 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800">
+      <div
+        style={{
+          minHeight: 0,
+          flex: 1,
+          overflowY: "auto",
+          padding: 14,
+          borderRadius: 20,
+          background: "var(--sm-bg-sunken)",
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+        }}
+      >
         {chatMessages.length === 0 ? (
-          <p className="text-sm text-slate-600 dark:text-slate-300">No messages yet.</p>
+          <p
+            style={{
+              fontSize: 13,
+              color: "var(--sm-fg-muted)",
+              margin: "auto 0",
+              textAlign: "center",
+            }}
+          >
+            No messages yet. Say hi.
+          </p>
         ) : (
-          <ul className="space-y-2">
-            {chatMessages.map((message, index) => (
-              <li
+          chatMessages.map((message, index) => {
+            const isPrivate = message.to_user_id !== null;
+            return (
+              <div
                 key={`${message.from_user_id ?? "unknown"}:${message.created_at}:${index}`}
-                className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900"
+                style={{
+                  background: "#fff",
+                  padding: "10px 12px",
+                  borderRadius: 14,
+                  boxShadow: "inset 0 0 0 1px var(--sm-line)",
+                }}
               >
-                <p className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
-                  {getSenderLabel(message)} • {getTargetLabel(message)}
-                  {message.created_at ? ` • ${message.created_at}` : ""}
-                </p>
-                <p className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-800 dark:text-slate-100">
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    fontSize: 11,
+                    color: "var(--sm-fg-subtle)",
+                    fontWeight: 500,
+                  }}
+                >
+                  <span style={{ color: "var(--sm-fg)", fontWeight: 600 }}>
+                    {getSenderLabel(message)}
+                  </span>
+                  <span>·</span>
+                  <span style={{ color: isPrivate ? "var(--sm-accent)" : "var(--sm-fg-subtle)" }}>
+                    {getTargetLabel(message)}
+                  </span>
+                </div>
+                <p
+                  style={{
+                    margin: "4px 0 0",
+                    fontSize: 13.5,
+                    lineHeight: 1.45,
+                    color: "var(--sm-fg)",
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                  }}
+                >
                   {message.content}
                 </p>
-              </li>
-            ))}
-          </ul>
+              </div>
+            );
+          })
         )}
       </div>
 
-      <form onSubmit={onSubmit} className="space-y-2">
-        <select
-          value={selectedRecipientUserId === null ? "public" : String(selectedRecipientUserId)}
-          onChange={(event) => setSelectedRecipientFromValue(event.target.value)}
-          disabled={!canSendChat || !isSocketOpen}
-          className="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-blue-500 dark:focus:ring-blue-900/40"
-        >
-          <option value="public">Public</option>
-          {chatRecipientOptions.map((option) => (
-            <option key={option.userId} value={option.userId}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-        <div className="flex gap-2">
+      <form onSubmit={onSubmit} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ position: "relative" }}>
+          <select
+            value={selectedRecipientUserId === null ? "public" : String(selectedRecipientUserId)}
+            onChange={(event) => setSelectedRecipientFromValue(event.target.value)}
+            disabled={inputsDisabled}
+            className="sm-input"
+            style={{
+              appearance: "none",
+              WebkitAppearance: "none",
+              paddingRight: 36,
+              cursor: inputsDisabled ? "not-allowed" : "pointer",
+            }}
+          >
+            <option value="public">Send to everyone</option>
+            {chatRecipientOptions.map((option) => (
+              <option key={option.userId} value={option.userId}>
+                Private: {option.label}
+              </option>
+            ))}
+          </select>
+          <span
+            style={{
+              position: "absolute",
+              right: 12,
+              top: 0,
+              bottom: 0,
+              display: "inline-flex",
+              alignItems: "center",
+              color: "var(--sm-fg-subtle)",
+              pointerEvents: "none",
+            }}
+          >
+            <SmIcon name="chevR" size={14} />
+          </span>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
           <input
             type="text"
             value={chatInput}
             onChange={(event) => setChatInput(event.target.value)}
-            disabled={!canSendChat || !isSocketOpen}
-            placeholder={canSendChat ? "Type a message" : "Messaging disabled until active"}
-            className="h-11 flex-1 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-blue-500 dark:focus:ring-blue-900/40"
+            disabled={inputsDisabled}
+            placeholder={canSendChat ? "Type a message…" : "Messaging disabled until active"}
+            className="sm-input"
+            style={{ flex: 1 }}
           />
-          <button
+          <SmButton
             type="submit"
-            disabled={!canSendChat || !isSocketOpen}
-            className="inline-flex h-11 items-center justify-center rounded-lg bg-black px-4 text-sm font-medium text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-blue-900 dark:hover:bg-blue-800"
+            variant="primary"
+            size="md"
+            disabled={inputsDisabled}
+            icon="send"
           >
             Send
-          </button>
+          </SmButton>
         </div>
       </form>
     </div>

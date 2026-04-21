@@ -1,5 +1,6 @@
 import { type RoomPresenceUser } from "../../hooks/useRoomSocket";
 import type { PeerConnectionSnapshot } from "../../hooks/useWebRtcPeers";
+import { SmBadge, SmButton } from "../sm";
 
 const getPresenceUserLabel = (user: RoomPresenceUser): string => {
   if (user.label.trim()) {
@@ -13,6 +14,12 @@ const getPresenceUserLabel = (user: RoomPresenceUser): string => {
   return "Unknown user";
 };
 
+const initialsFor = (value: string): string => {
+  const parts = value.trim().split(/\s+/).filter(Boolean).slice(0, 2);
+  if (!parts.length) return "?";
+  return parts.map((p) => p.charAt(0).toUpperCase()).join("");
+};
+
 type ParticipantsPanelProps = {
   activeUsers: RoomPresenceUser[];
   localUserId: number | null;
@@ -23,7 +30,7 @@ type ParticipantsPanelProps = {
 
 const statusLabelForSnapshot = (snapshot: PeerConnectionSnapshot | undefined): string => {
   if (!snapshot) {
-    return "Not connected";
+    return "Idle";
   }
 
   if (snapshot.error) {
@@ -47,33 +54,33 @@ const statusLabelForSnapshot = (snapshot: PeerConnectionSnapshot | undefined): s
   }
 };
 
-const statusBadgeClass = (snapshot: PeerConnectionSnapshot | undefined): string => {
-  if (!snapshot || snapshot.connectionState === "closed" || snapshot.connectionState === "new") {
-    return "border-slate-300 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200";
-  }
-
-  if (snapshot.error || snapshot.connectionState === "failed") {
-    return "border-red-300 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-950/50 dark:text-red-300";
-  }
-
-  if (snapshot.connectionState === "connected") {
-    return "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-300";
-  }
-
-  if (snapshot.connectionState === "disconnected") {
-    return "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300";
-  }
-
-  return "border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/50 dark:text-blue-300";
+const statusTone = (
+  snapshot: PeerConnectionSnapshot | undefined,
+): "success" | "danger" | "warn" | "neutral" => {
+  if (!snapshot) return "neutral";
+  if (snapshot.error || snapshot.connectionState === "failed") return "danger";
+  if (snapshot.connectionState === "connected") return "success";
+  if (snapshot.connectionState === "disconnected") return "warn";
+  return "neutral";
 };
 
-const ParticipantsPanel = ({ activeUsers, localUserId, peerStates, isHost, onMakeHost }: ParticipantsPanelProps) => {
+const ParticipantsPanel = ({
+  activeUsers,
+  localUserId,
+  peerStates,
+  isHost,
+  onMakeHost,
+}: ParticipantsPanelProps) => {
   if (activeUsers.length === 0) {
-    return <p className="text-sm text-slate-600 dark:text-slate-300">No active users yet.</p>;
+    return (
+      <p style={{ fontSize: 13.5, color: "var(--sm-fg-muted)" }}>
+        No active participants yet.
+      </p>
+    );
   }
 
   return (
-    <ul className="space-y-2">
+    <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 10 }}>
       {activeUsers.map((user) => {
         const userLabel = getPresenceUserLabel(user);
         const userId = user.userId;
@@ -84,31 +91,63 @@ const ParticipantsPanel = ({ activeUsers, localUserId, peerStates, isHost, onMak
         return (
           <li
             key={userId !== null ? String(userId) : userLabel}
-            className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 10,
+              padding: "12px 14px",
+              borderRadius: 16,
+              background: "var(--sm-bg-sunken)",
+            }}
           >
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{userLabel}</p>
-                <p className="text-xs text-slate-500 dark:text-slate-400">{isLocalUser ? "You" : "Participant"}</p>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+              <span
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: 999,
+                  background: "var(--sm-fg)",
+                  color: "#F5F5F7",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  flexShrink: 0,
+                }}
+              >
+                {initialsFor(userLabel)}
+              </span>
+              <div style={{ minWidth: 0 }}>
+                <div
+                  style={{
+                    fontSize: 13.5,
+                    fontWeight: 500,
+                    color: "var(--sm-fg)",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {userLabel}
+                </div>
+                <div style={{ fontSize: 11.5, color: "var(--sm-fg-subtle)" }}>
+                  {isLocalUser ? "You · local" : "Participant"}
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                {canMakeHost ? (
-                  <button
-                    type="button"
-                    onClick={() => onMakeHost(userId)}
-                    className="inline-flex h-9 items-center justify-center rounded-lg border border-amber-300 bg-amber-50 px-3 text-xs font-medium text-amber-700 transition hover:bg-amber-100 dark:border-amber-900/40 dark:bg-amber-950/40 dark:text-amber-300 dark:hover:bg-amber-950/60"
-                  >
-                    Make Host
-                  </button>
-                ) : null}
-                {!isLocalUser && userId !== null ? (
-                  <span
-                    className={`inline-flex h-9 items-center justify-center rounded-lg border px-3 text-xs font-medium ${statusBadgeClass(snapshot)}`}
-                  >
-                    {statusLabelForSnapshot(snapshot)}
-                  </span>
-                ) : null}
-              </div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+              {!isLocalUser && userId !== null ? (
+                <SmBadge tone={statusTone(snapshot)}>
+                  {statusLabelForSnapshot(snapshot)}
+                </SmBadge>
+              ) : null}
+              {canMakeHost ? (
+                <SmButton variant="ghost" size="sm" onClick={() => onMakeHost(userId)}>
+                  Make host
+                </SmButton>
+              ) : null}
             </div>
           </li>
         );
