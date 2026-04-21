@@ -1,6 +1,15 @@
 import { motion } from "framer-motion";
-import { trustItems } from "../content";
+import { SmIcon, type SmIconName } from "../../sm";
 import { fadeInUp, transition } from "../motion";
+
+type TrustItem = { label: string; icon: SmIconName };
+
+const trustItems: TrustItem[] = [
+  { label: "End-to-end encrypted", icon: "lock" },
+  { label: "Rooms expire in 2 hours", icon: "clock" },
+  { label: "Up to 10 participants", icon: "users" },
+  { label: "Zero data retention", icon: "shield" },
+];
 
 function TrustBarSection() {
   return (
@@ -10,15 +19,39 @@ function TrustBarSection() {
       viewport={{ once: true, amount: 0.5 }}
       variants={fadeInUp}
       transition={transition}
-      className="border-y border-slate-200 py-12 dark:border-slate-800"
+      style={{
+        borderTop: "1px solid var(--sm-line)",
+        borderBottom: "1px solid var(--sm-line)",
+        padding: "40px 20px",
+      }}
     >
-      <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-center gap-8 px-4 sm:gap-12">
+      <div
+        style={{
+          maxWidth: 1120,
+          margin: "0 auto",
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: "32px 56px",
+        }}
+      >
         {trustItems.map((item) => (
           <span
             key={item.label}
-            className="flex items-center gap-2.5 text-sm font-medium text-slate-500 dark:text-slate-400"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 10,
+              fontSize: 13,
+              fontWeight: 500,
+              color: "var(--sm-fg-muted)",
+              letterSpacing: "-0.005em",
+            }}
           >
-            <span className="text-slate-400 dark:text-slate-500">{item.icon}</span>
+            <span style={{ color: "var(--sm-fg-subtle)" }}>
+              <SmIcon name={item.icon} size={18} />
+            </span>
             {item.label}
           </span>
         ))}

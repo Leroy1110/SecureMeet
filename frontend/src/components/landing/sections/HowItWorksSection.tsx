@@ -1,43 +1,103 @@
 import { motion } from "framer-motion";
-import { steps } from "../content";
 import { fadeInUp, staggerContainer, transition } from "../motion";
+
+const steps = [
+  {
+    number: "1",
+    title: "Create a room",
+    description: "Generate a secure room with a unique code and password. Share credentials with your team.",
+  },
+  {
+    number: "2",
+    title: "Join securely",
+    description: "Participants enter credentials and wait in the lobby. The host approves each one.",
+  },
+  {
+    number: "3",
+    title: "Meet privately",
+    description: "End-to-end encrypted video, audio, and chat. The room expires when you're done.",
+  },
+];
 
 function HowItWorksSection() {
   return (
-    <section className="px-4 py-24 sm:py-32">
+    <section id="how" style={{ padding: "80px 28px", maxWidth: 960, margin: "0 auto" }}>
       <motion.div
-        className="mx-auto max-w-4xl"
         initial="hidden"
         whileInView="visible"
         viewport={{ once: true, amount: 0.15 }}
         variants={staggerContainer}
       >
-        <motion.div variants={fadeInUp} transition={transition} className="text-center">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
-            How it works
-          </p>
-          <h2 className="mt-4 text-4xl font-semibold tracking-tight text-slate-900 sm:text-5xl dark:text-slate-100">
+        <motion.div variants={fadeInUp} transition={transition} style={{ textAlign: "center" }}>
+          <div className="sm-eyebrow">How it works</div>
+          <h2
+            className="sm-h2"
+            style={{ margin: "14px 0 0", fontSize: "clamp(36px, 5vw, 52px)" }}
+          >
             Three steps. Total privacy.
           </h2>
         </motion.div>
 
-        <div className="relative mt-16 grid gap-10 sm:grid-cols-3 sm:gap-6">
-          <div className="absolute left-[calc(16.667%+20px)] right-[calc(16.667%+20px)] top-[22px] hidden h-px bg-slate-200 sm:block dark:bg-slate-800" />
-
+        <div
+          style={{
+            position: "relative",
+            marginTop: 56,
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            gap: 40,
+          }}
+        >
           {steps.map((step, index) => (
             <motion.div
               key={step.number}
               variants={fadeInUp}
-              transition={{ ...transition, delay: index * 0.15 }}
-              className="relative flex flex-col items-center text-center"
+              transition={{ ...transition, delay: index * 0.12 }}
+              style={{
+                position: "relative",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                textAlign: "center",
+              }}
             >
-              <span className="relative z-10 inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-slate-100 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: 44,
+                  height: 44,
+                  borderRadius: 14,
+                  background: "#fff",
+                  boxShadow: "inset 0 0 0 1px var(--sm-line), var(--sm-shadow-xs)",
+                  fontSize: 15,
+                  fontWeight: 600,
+                  color: "var(--sm-fg)",
+                  fontFamily: "var(--sm-font-mono)",
+                }}
+              >
                 {step.number}
               </span>
-              <h3 className="mt-5 text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">
+              <h3
+                style={{
+                  margin: "20px 0 6px",
+                  fontSize: 20,
+                  fontWeight: 600,
+                  letterSpacing: "-0.015em",
+                  color: "var(--sm-fg)",
+                }}
+              >
                 {step.title}
               </h3>
-              <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
+              <p
+                style={{
+                  margin: 0,
+                  maxWidth: 280,
+                  fontSize: 14,
+                  lineHeight: 1.5,
+                  color: "var(--sm-fg-muted)",
+                }}
+              >
                 {step.description}
               </p>
             </motion.div>

@@ -1,66 +1,271 @@
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { fadeInUp, staggerContainer, transition } from "../motion";
+import { SmButton, SmIcon } from "../../sm";
+
+const participants = [
+  { n: "TM", name: "Tom · You", color: "#1b3158" },
+  { n: "JM", name: "Jun", color: "#244a38" },
+  { n: "IY", name: "ilay", color: "#3a2450" },
+  { n: "LT", name: "Leo", color: "#553a1d" },
+  { n: "RI", name: "Roni", color: "#4a1e25" },
+];
 
 function HeroSection() {
   return (
-    <section className="relative flex min-h-[88vh] items-center justify-center overflow-hidden px-4 pb-16 pt-20 sm:pt-24">
-      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(248,250,252,0.95)_52%,rgba(241,245,249,0.95)_100%)] dark:bg-[linear-gradient(180deg,rgba(2,6,23,0.98)_0%,rgba(2,6,23,0.95)_50%,rgba(5,18,52,0.97)_100%)]" />
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_24%_24%,rgba(148,163,184,0.14),transparent_40%),radial-gradient(circle_at_82%_84%,rgba(96,165,250,0.16),transparent_42%)] dark:bg-[radial-gradient(circle_at_24%_24%,rgba(59,130,246,0.16),transparent_40%),radial-gradient(circle_at_82%_84%,rgba(99,102,241,0.2),transparent_42%)]" />
-      <div className="pointer-events-none absolute inset-0 opacity-25 [background:linear-gradient(rgba(148,163,184,0.12)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.12)_1px,transparent_1px)] [background-size:44px_44px] dark:opacity-12" />
+    <section
+      style={{
+        position: "relative",
+        padding: "120px 28px 80px",
+        textAlign: "center",
+        maxWidth: 960,
+        margin: "0 auto",
+      }}
+    >
+      {/* Soft radial wash (≤5% opacity, no gradient clouds) */}
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          pointerEvents: "none",
+          background:
+            "radial-gradient(50% 50% at 50% 15%, rgba(0, 92, 230, 0.05), transparent 70%)",
+        }}
+      />
 
       <motion.div
-        className="pointer-events-none absolute -left-10 top-32 h-72 w-72 rounded-full bg-sky-300/24 blur-[120px] dark:bg-blue-500/24"
-        animate={{ x: [0, 24, 0], y: [0, 16, 0], scale: [1, 1.06, 1] }}
-        transition={{ duration: 12, repeat: Infinity, ease: "easeInOut" }}
-      />
-      <motion.div
-        className="pointer-events-none absolute -right-14 bottom-14 h-72 w-72 rounded-full bg-indigo-300/24 blur-[120px] dark:bg-indigo-500/24"
-        animate={{ x: [0, -28, 0], y: [0, -12, 0], scale: [1.04, 1, 1.04] }}
-        transition={{ duration: 14, repeat: Infinity, ease: "easeInOut" }}
-      />
-
-      <motion.div className="relative mx-auto max-w-3xl text-center" variants={staggerContainer} initial="hidden" animate="visible">
-        <motion.div variants={fadeInUp} transition={transition} className="inline-flex items-center gap-2 rounded-full border border-slate-300/70 bg-white/70 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-600 backdrop-blur dark:border-slate-700/70 dark:bg-slate-900/55 dark:text-slate-300">
-          <span className="h-2 w-2 rounded-full bg-emerald-500" />
-          Secure Video Conferencing
+        variants={staggerContainer}
+        initial="hidden"
+        animate="visible"
+        style={{ position: "relative" }}
+      >
+        <motion.div
+          variants={fadeInUp}
+          transition={transition}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "6px 14px",
+            borderRadius: 999,
+            background: "#fff",
+            boxShadow: "inset 0 0 0 1px var(--sm-line), var(--sm-shadow-xs)",
+            fontSize: 12.5,
+            fontWeight: 500,
+            color: "var(--sm-fg-muted)",
+          }}
+        >
+          <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--sm-success)" }} />
+          Privacy-first video meetings
         </motion.div>
 
-        <motion.h1 variants={fadeInUp} transition={transition} className="mt-8 text-5xl font-semibold tracking-tight text-slate-900 sm:text-6xl lg:text-7xl dark:text-slate-100">
+        <motion.h1
+          variants={fadeInUp}
+          transition={transition}
+          style={{
+            margin: "28px 0 0",
+            fontFamily: "var(--sm-font-display)",
+            fontSize: "clamp(48px, 8vw, 84px)",
+            fontWeight: 600,
+            letterSpacing: "-0.04em",
+            lineHeight: 1.02,
+            color: "var(--sm-fg)",
+          }}
+        >
           Meetings that stay
-          <span className="block bg-gradient-to-r from-blue-700 via-indigo-700 to-slate-900 bg-clip-text text-transparent dark:from-blue-300 dark:via-indigo-300 dark:to-slate-100">
-            between you.
-          </span>
+          <br />
+          <span style={{ color: "var(--sm-fg-subtle)" }}>between you.</span>
         </motion.h1>
 
-        <motion.p variants={fadeInUp} transition={transition} className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-slate-600 sm:text-xl dark:text-slate-300">
-          End-to-end encrypted video calls, host-controlled access, and rooms
+        <motion.p
+          variants={fadeInUp}
+          transition={transition}
+          style={{
+            margin: "26px auto 0",
+            maxWidth: 560,
+            fontSize: 19,
+            lineHeight: 1.5,
+            color: "var(--sm-fg-muted)",
+          }}
+        >
+          End-to-end encrypted video calls, host-approved access, and rooms
           that expire. No recordings. No compromises.
         </motion.p>
 
-        <motion.div variants={fadeInUp} transition={transition} className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
-          <Link
-            to="/register"
-            className="inline-flex h-12 items-center justify-center rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-9 text-base font-semibold text-white shadow-[0_18px_38px_-20px_rgba(59,130,246,0.75)] transition duration-200 hover:from-blue-500 hover:to-indigo-500"
-          >
-            Get Started
+        <motion.div
+          variants={fadeInUp}
+          transition={transition}
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 12,
+            justifyContent: "center",
+            marginTop: 36,
+          }}
+        >
+          <Link to="/register" style={{ textDecoration: "none" }}>
+            <SmButton variant="primary" size="lg" icon="arrow" iconTrailing>
+              Start a meeting
+            </SmButton>
           </Link>
-          <Link
-            to="/login"
-            className="inline-flex h-12 items-center justify-center rounded-xl border border-slate-300 bg-white/90 px-9 text-base font-medium text-slate-700 transition duration-200 hover:border-slate-400 hover:bg-white dark:border-slate-700 dark:bg-slate-900/85 dark:text-slate-200 dark:hover:border-slate-600 dark:hover:bg-slate-800"
-          >
-            Sign in
+          <Link to="/login" style={{ textDecoration: "none" }}>
+            <SmButton variant="secondary" size="lg">
+              Sign in
+            </SmButton>
           </Link>
         </motion.div>
 
-        <motion.p variants={fadeInUp} transition={transition} className="mt-5 text-xs text-slate-500 dark:text-slate-400">
-          No credit card required
+        <motion.p
+          variants={fadeInUp}
+          transition={transition}
+          style={{ marginTop: 16, fontSize: 12.5, color: "var(--sm-fg-subtle)" }}
+        >
+          No credit card required · Free for up to 10 participants
         </motion.p>
 
-        <motion.div variants={fadeInUp} transition={transition} className="mx-auto mt-10 flex max-w-xl flex-wrap items-center justify-center gap-3 text-xs font-medium text-slate-600 dark:text-slate-300">
-          <span className="rounded-full border border-slate-300/80 bg-white/80 px-3 py-1.5 dark:border-slate-700 dark:bg-slate-900/65">AES + RSA encryption</span>
-          <span className="rounded-full border border-slate-300/80 bg-white/80 px-3 py-1.5 dark:border-slate-700 dark:bg-slate-900/65">No recordings</span>
-          <span className="rounded-full border border-slate-300/80 bg-white/80 px-3 py-1.5 dark:border-slate-700 dark:bg-slate-900/65">Auto-expiring rooms</span>
+        {/* Hero device preview */}
+        <motion.div
+          variants={fadeInUp}
+          transition={transition}
+          style={{ marginTop: 72, position: "relative" }}
+        >
+          <div
+            style={{
+              borderRadius: 28,
+              overflow: "hidden",
+              boxShadow: "var(--sm-shadow-xl)",
+              background: "var(--sm-stage)",
+              aspectRatio: "16 / 9",
+              position: "relative",
+            }}
+          >
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                background:
+                  "radial-gradient(60% 70% at 50% 30%, rgba(77,156,255,0.18), transparent 70%)",
+              }}
+            />
+            <div
+              style={{
+                position: "absolute",
+                inset: 28,
+                display: "grid",
+                gridTemplateColumns: "2fr 1fr 1fr",
+                gridTemplateRows: "1fr 1fr",
+                gap: 14,
+              }}
+            >
+              {participants.map((p, i) => (
+                <div
+                  key={p.n}
+                  style={{
+                    gridColumn: i === 0 ? "span 1" : undefined,
+                    gridRow: i === 0 ? "span 2" : undefined,
+                    borderRadius: 18,
+                    background: `linear-gradient(135deg, ${p.color}, #0A0A0C)`,
+                    position: "relative",
+                    boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.06)",
+                  }}
+                >
+                  <div
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: i === 0 ? 72 : 36,
+                        height: i === 0 ? 72 : 36,
+                        borderRadius: "50%",
+                        background: "rgba(255,255,255,0.08)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: "#F5F5F7",
+                        fontWeight: 600,
+                        fontSize: i === 0 ? 22 : 14,
+                      }}
+                    >
+                      {p.n}
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: 10,
+                      bottom: 10,
+                      padding: "4px 10px",
+                      borderRadius: 999,
+                      background: "rgba(10,10,12,0.6)",
+                      backdropFilter: "blur(8px)",
+                      WebkitBackdropFilter: "blur(8px)",
+                      color: "#F5F5F7",
+                      fontSize: 11,
+                      fontWeight: 500,
+                    }}
+                  >
+                    {p.name}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {/* Floating dock */}
+            <div
+              style={{
+                position: "absolute",
+                left: "50%",
+                bottom: 24,
+                transform: "translateX(-50%)",
+                display: "flex",
+                gap: 8,
+                padding: 10,
+                background: "rgba(22,23,27,0.68)",
+                backdropFilter: "var(--sm-blur-md)",
+                WebkitBackdropFilter: "var(--sm-blur-md)",
+                borderRadius: 999,
+                border: "1px solid rgba(255,255,255,0.08)",
+              }}
+            >
+              {(["mic", "video", "screen", "chat", "users"] as const).map((n) => (
+                <div
+                  key={n}
+                  style={{
+                    width: 40,
+                    height: 40,
+                    borderRadius: 999,
+                    background: "rgba(255,255,255,0.08)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "#F5F5F7",
+                  }}
+                >
+                  <SmIcon name={n} size={16} />
+                </div>
+              ))}
+              <div
+                style={{
+                  padding: "0 16px",
+                  height: 40,
+                  borderRadius: 999,
+                  background: "var(--sm-danger)",
+                  color: "#fff",
+                  display: "flex",
+                  alignItems: "center",
+                  fontSize: 13,
+                  fontWeight: 600,
+                }}
+              >
+                End
+              </div>
+            </div>
+          </div>
         </motion.div>
       </motion.div>
     </section>

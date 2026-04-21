@@ -1,45 +1,124 @@
 import { motion } from "framer-motion";
-import { features } from "../content";
+import { SmIcon, type SmIconName } from "../../sm";
 import { fadeInUp, staggerContainer, transition } from "../motion";
+
+type Feature = {
+  title: string;
+  description: string;
+  icon: SmIconName;
+};
+
+const features: Feature[] = [
+  {
+    icon: "lock",
+    title: "End-to-end encrypted",
+    description: "RSA + AES. Keys never leave your device - not even we can read your conversation.",
+  },
+  {
+    icon: "users",
+    title: "Host-approved waiting room",
+    description: "Every participant is vetted before they join. You decide who enters.",
+  },
+  {
+    icon: "clock",
+    title: "Rooms expire in 2 hours",
+    description: "No recordings. No transcripts. No lingering data.",
+  },
+  {
+    icon: "chat",
+    title: "Encrypted chat",
+    description: "Public and private messages encrypted at rest, scoped to the room.",
+  },
+  {
+    icon: "screen",
+    title: "Host-controlled sharing",
+    description: "Screen sharing requires host approval. No surprises.",
+  },
+  {
+    icon: "shield",
+    title: "Zero data retention",
+    description: "Audit trail for you, nothing for us. Full transparency.",
+  },
+];
 
 function FeaturesSection() {
   return (
-    <section className="px-4 py-24 sm:py-32">
+    <section id="features" style={{ padding: "100px 28px", maxWidth: 1120, margin: "0 auto" }}>
       <motion.div
-        className="mx-auto max-w-6xl"
         initial="hidden"
         whileInView="visible"
         viewport={{ once: true, amount: 0.1 }}
         variants={staggerContainer}
       >
-        <motion.div variants={fadeInUp} transition={transition} className="text-center">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
-            Features
-          </p>
-          <h2 className="mt-4 text-4xl font-semibold tracking-tight text-slate-900 sm:text-5xl dark:text-slate-100">
+        <motion.div variants={fadeInUp} transition={transition} style={{ textAlign: "center" }}>
+          <div className="sm-eyebrow">What's inside</div>
+          <h2
+            className="sm-h2"
+            style={{
+              margin: "14px 0 0",
+              color: "var(--sm-fg)",
+              fontSize: "clamp(36px, 5vw, 52px)",
+            }}
+          >
             Everything you need.
-            <br className="hidden sm:block" /> Nothing you don't.
+            <br />
+            Nothing you don't.
           </h2>
-          <p className="mx-auto mt-4 max-w-xl text-lg text-slate-600 dark:text-slate-300">
-            Built from the ground up for security-first meetings.
-          </p>
         </motion.div>
 
-        <div className="mt-16 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        <div
+          style={{
+            marginTop: 48,
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+            gap: 14,
+          }}
+        >
           {features.map((feature, index) => (
             <motion.div
               key={feature.title}
               variants={fadeInUp}
-              transition={{ ...transition, delay: index * 0.08 }}
-              className="flex flex-col items-start rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-[0_20px_55px_-35px_rgba(15,23,42,0.4)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_25px_55px_-30px_rgba(15,23,42,0.45)] dark:border-slate-800 dark:bg-slate-900/90"
+              transition={{ ...transition, delay: index * 0.06 }}
+              style={{
+                background: "#fff",
+                borderRadius: 20,
+                padding: "24px 24px 28px",
+                boxShadow: "inset 0 0 0 1px var(--sm-line), var(--sm-shadow-xs)",
+              }}
             >
-              <span className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
-                {feature.icon}
-              </span>
-              <h3 className="mt-5 text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
+              <div
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 12,
+                  background: "var(--sm-bg-tint)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "var(--sm-fg)",
+                }}
+              >
+                <SmIcon name={feature.icon} size={18} />
+              </div>
+              <h3
+                style={{
+                  margin: "16px 0 6px",
+                  fontSize: 18,
+                  fontWeight: 600,
+                  letterSpacing: "-0.011em",
+                  color: "var(--sm-fg)",
+                }}
+              >
                 {feature.title}
               </h3>
-              <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: 14,
+                  color: "var(--sm-fg-muted)",
+                  lineHeight: 1.5,
+                }}
+              >
                 {feature.description}
               </p>
             </motion.div>
