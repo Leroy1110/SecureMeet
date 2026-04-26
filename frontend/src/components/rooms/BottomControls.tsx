@@ -4,6 +4,16 @@ type BottomControlsProps = {
   activeCount: number;
   waitingCount: number;
   isHost: boolean;
+  audioMuted: boolean;
+  videoOff: boolean;
+  isScreenSharing: boolean;
+  isAnotherUserSharing: boolean;
+  canStartScreenShare: boolean;
+  canToggleMute?: boolean;
+  canToggleCamera?: boolean;
+  onToggleMute: () => void;
+  onToggleCamera: () => void;
+  onToggleScreenShare: () => void;
   onOpenActive: () => void;
   onOpenWaiting: () => void;
   onOpenChat: () => void;
@@ -14,7 +24,7 @@ type ControlButtonProps = {
   icon: SmIconName;
   label: string;
   onClick?: () => void;
-  tone?: "default" | "muted" | "danger";
+  tone?: "default" | "muted" | "danger" | "accent";
   disabled?: boolean;
   badge?: number;
   title?: string;
@@ -48,6 +58,8 @@ const ControlButton = ({
   const toneStyle: React.CSSProperties =
     tone === "danger"
       ? { background: "var(--sm-danger)", color: "#fff" }
+      : tone === "accent"
+      ? { background: "var(--sm-accent)", color: "#fff" }
       : tone === "muted"
       ? { background: "rgba(255,255,255,0.04)" }
       : {};
@@ -122,11 +134,24 @@ const BottomControls = ({
   activeCount,
   waitingCount,
   isHost,
+  audioMuted,
+  videoOff,
+  isScreenSharing,
+  isAnotherUserSharing,
+  canStartScreenShare,
+  canToggleMute = true,
+  canToggleCamera = true,
+  onToggleMute,
+  onToggleCamera,
+  onToggleScreenShare,
   onOpenActive,
   onOpenWaiting,
   onOpenChat,
   onLeave,
 }: BottomControlsProps) => {
+  const screenShareBlocked = isAnotherUserSharing && !isScreenSharing;
+  const screenShareDisabled = isScreenSharing ? false : !canStartScreenShare || screenShareBlocked;
+
   return (
     <footer
       style={{
@@ -153,25 +178,36 @@ const BottomControls = ({
         }}
       >
         <ControlButton
-          icon="mic"
-          label="Mute"
-          tone="muted"
-          disabled
-          title="Mute/unmute signaling is not available in V1"
+          icon={audioMuted ? "micOff" : "mic"}
+          label={audioMuted ? "Unmute" : "Mute"}
+          tone={audioMuted ? "danger" : "default"}
+          onClick={onToggleMute}
+          disabled={!canToggleMute}
+          title={canToggleMute ? (audioMuted ? "Unmute microphone" : "Mute microphone") : "No microphone available"}
         />
         <ControlButton
-          icon="video"
-          label="Camera"
-          tone="muted"
-          disabled
-          title="Camera toggle is not available in V1"
+          icon={videoOff ? "videoOff" : "video"}
+          label={videoOff ? "Camera on" : "Camera off"}
+          tone={videoOff ? "danger" : "default"}
+          onClick={onToggleCamera}
+          disabled={!canToggleCamera}
+          title={canToggleCamera ? (videoOff ? "Turn camera on" : "Turn camera off") : "No camera available"}
         />
         <ControlButton
           icon="screen"
-          label="Share"
-          tone="muted"
-          disabled
-          title="Screen sharing is not available in V1"
+          label={isScreenSharing ? "Stop share" : "Share"}
+          tone={isScreenSharing ? "accent" : "default"}
+          onClick={onToggleScreenShare}
+          disabled={screenShareDisabled}
+          title={
+            isScreenSharing
+              ? "Stop sharing your screen"
+              : !canStartScreenShare
+              ? "Screen sharing is currently unavailable"
+              : screenShareBlocked
+              ? "Another participant is currently sharing their screen"
+              : "Share your screen"
+          }
         />
         <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.08)", margin: "0 4px" }} />
         <ControlButton

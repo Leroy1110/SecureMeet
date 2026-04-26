@@ -13,12 +13,14 @@ type MeetingStageProps = {
   localUserId: number | null;
   localDisplayName: string;
   localStream: MediaStream | null;
+  localCameraPreviewStream: MediaStream | null;
   hasLocalVideoTrack: boolean;
   hasLocalAudioTrack: boolean;
   localMediaUiState: LocalMediaUiState;
   peerStates: Map<number, PeerConnectionSnapshot>;
   meshUiState: MeshUiState;
   mediaTopology: MediaTopology;
+  screenSharerUserId: number | null;
 };
 
 const getPresenceUserLabel = (user: RoomPresenceUser): string => {
@@ -98,17 +100,25 @@ const getGridTemplate = (totalTiles: number): string => {
   return "repeat(auto-fit, minmax(220px, 1fr))";
 };
 
+const hasLiveLocalVideoTrack = (stream: MediaStream | null): boolean =>
+  Boolean(stream?.getVideoTracks().some((track) => track.readyState === "live" && track.enabled));
+
+const hasLiveRemoteVideoTrack = (stream: MediaStream | null): boolean =>
+  Boolean(stream?.getVideoTracks().some((track) => track.readyState === "live" && !track.muted));
+
 const MeetingStage = ({
   activeUsers,
   localUserId,
   localDisplayName,
   localStream,
+  localCameraPreviewStream,
   hasLocalVideoTrack,
   hasLocalAudioTrack,
   localMediaUiState,
   peerStates,
   meshUiState,
   mediaTopology,
+  screenSharerUserId,
 }: MeetingStageProps) => {
   const remoteParticipants = activeUsers.filter(
     (user) => user.userId !== null && user.userId > 0 && user.userId !== localUserId
@@ -128,6 +138,26 @@ const MeetingStage = ({
       : meshUiState === "failed"
       ? "inverse-danger"
       : "inverse-neutral";
+  const isLocalSharing = localUserId !== null && screenSharerUserId === localUserId;
+  const remoteSharer = remoteParticipants.find((user) => user.userId === screenSharerUserId) ?? null;
+  const sharedStream = isLocalSharing
+    ? localStream
+    : remoteSharer && remoteSharer.userId !== null
+    ? peerStates.get(remoteSharer.userId)?.remoteStream ?? null
+    : null;
+  const localTileStream = isLocalSharing ? localCameraPreviewStream : localStream;
+  const showLocalTileVideo = isLocalSharing
+    ? hasLiveLocalVideoTrack(localCameraPreviewStream)
+    : hasLocalVideoTrack;
+  const showSharedStage = screenSharerUserId !== null;
+  const sharedStageName = isLocalSharing
+    ? `${localDisplayName} (You)`
+    : remoteSharer
+    ? getPresenceUserLabel(remoteSharer)
+    : "Participant";
+  const hasSharedVideo = isLocalSharing
+    ? hasLiveLocalVideoTrack(sharedStream)
+    : hasLiveRemoteVideoTrack(sharedStream);
 
   return (
     <section
@@ -192,6 +222,20 @@ const MeetingStage = ({
         </div>
       ) : null}
 
+      {showSharedStage ? (
+        <div style={{ position: "relative", marginBottom: 12 }}>
+          <ParticipantTile
+            name={sharedStageName}
+            label="Shared screen"
+            status={hasSharedVideo ? "Live share" : "Preparing share"}
+            stream={sharedStream}
+            showVideo={hasSharedVideo}
+            muted={isLocalSharing}
+            accent
+          />
+        </div>
+      ) : null}
+
       <div
         style={{
           position: "relative",
@@ -203,9 +247,9 @@ const MeetingStage = ({
         <ParticipantTile
           name={localDisplayName}
           label="You"
-          status={localMediaDescriptionByState[localMediaUiState]}
-          stream={localStream}
-          showVideo={hasLocalVideoTrack}
+          status={isLocalSharing ? "Sharing screen" : localMediaDescriptionByState[localMediaUiState]}
+          stream={localTileStream}
+          showVideo={showLocalTileVideo}
           muted
           accent
         />
@@ -218,10 +262,13 @@ const MeetingStage = ({
 
           const snapshot = peerStates.get(userId);
           const remoteStream = snapshot?.remoteStream ?? null;
-          const hasRemoteVideo = Boolean(remoteStream?.getVideoTracks().length);
+          const hasRemoteVideo = hasLiveRemoteVideoTrack(remoteStream);
           const hasRemoteAudio = Boolean(remoteStream?.getAudioTracks().length);
           const tileState = derivePeerTileState(snapshot, hasRemoteVideo, hasRemoteAudio);
-          const statusLabel = snapshot?.error || peerTileDescriptionByState[tileState];
+          const isSharing = screenSharerUserId === userId;
+          const statusLabel = isSharing
+            ? "Sharing screen"
+            : snapshot?.error || peerTileDescriptionByState[tileState];
 
           return (
             <ParticipantTile
@@ -230,8 +277,9 @@ const MeetingStage = ({
               label="Participant"
               status={statusLabel}
               stream={remoteStream}
-              showVideo={hasRemoteVideo}
+              showVideo={!isSharing && hasRemoteVideo}
               playAudioWhenAudioOnly
+              accent={isSharing}
             />
           );
         })}

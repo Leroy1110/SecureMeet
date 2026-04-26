@@ -11,6 +11,7 @@ import type { LocalMediaUiState, MeshUiState } from "../components/rooms/types";
 import WaitingPanel from "../components/rooms/WaitingPanel";
 import { useLocalMedia } from "../hooks/useLocalMedia";
 import { type QueuedWebRtcSignal, type SessionStatus, useRoomSocket } from "../hooks/useRoomSocket";
+import { useScreenShare } from "../hooks/useScreenShare";
 import { useWebRtcPeers } from "../hooks/useWebRtcPeers";
 import { ROOM_MEDIA_TOPOLOGY } from "../lib/mediaTopology";
 import { getRoomEntryPreferences } from "../lib/roomEntryPreferences";
@@ -97,6 +98,8 @@ function RoomPage() {
     lastMessageType,
     queuedWebRtcSignals,
     localUserId,
+    screenSharerUserId,
+    forceStopScreenShareNonce,
     normalizedRoomCode,
     role,
     roomState,
@@ -104,9 +107,12 @@ function RoomPage() {
     consumeWebRtcSignal,
     sendChatMessage,
     sendHostKickAction,
+    sendHostScreenStop,
     sendHostTransfer,
     sendHostWaitingAction,
     sendEndMeeting,
+    sendScreenShareStart,
+    sendScreenShareStop,
     sendWebRtcAnswer,
     sendWebRtcIceCandidate,
     sendWebRtcOffer,
@@ -126,7 +132,6 @@ function RoomPage() {
   const audioEnabled = roomEntryPreferences?.audioEnabled ?? true;
   const videoEnabled = roomEntryPreferences?.videoEnabled ?? true;
   const shouldStartLocalMedia = role === "host" || sessionStatus === "active";
-  const preferencesMediaDisabled = !audioEnabled && !videoEnabled;
 
   const processingSignalPeersRef = useRef<Set<number>>(new Set());
   const pendingOfferInitiationsRef = useRef<Set<number>>(new Set());
@@ -143,8 +148,17 @@ function RoomPage() {
     mediaError,
     mediaReady,
     mediaDisabled,
+    audioMuted,
+    videoOff,
+    hasAudioDevice,
+    hasVideoDevice,
     startLocalMedia,
     stopLocalMedia,
+    setAudioMuted,
+    setVideoOff,
+    replaceLocalVideoTrack,
+    restoreCameraTrack,
+    getCameraVideoTrack,
   } = useLocalMedia();
 
   const {
@@ -160,7 +174,34 @@ function RoomPage() {
     hasInitiatedOffer,
     markAwaitingAnswer,
     isAwaitingAnswer,
+    replaceVideoTrackForAllPeers,
   } = useWebRtcPeers();
+
+  const {
+    isSharing: isScreenSharing,
+    canShareScreen,
+    screenShareError,
+    startScreenShare,
+    stopScreenShare,
+  } = useScreenShare({
+    replaceVideoTrackForAllPeers,
+    replaceLocalVideoTrack,
+    restoreCameraTrack,
+    sendScreenShareStart,
+    sendScreenShareStop,
+    forceStopScreenShareNonce,
+  });
+  const closeAllPeerConnectionsRef = useRef(closeAllPeerConnections);
+  const stopLocalMediaRef = useRef(stopLocalMedia);
+  const stopScreenShareRef = useRef(stopScreenShare);
+
+  const isAnotherUserSharing = screenSharerUserId !== null && screenSharerUserId !== localUserId;
+  const canStartScreenShare =
+    canShareScreen &&
+    canSendWebRtc &&
+    isSocketOpen &&
+    shouldStartLocalMedia &&
+    !isFinalState;
 
   const buildIceCandidateHandler = useCallback(
     (targetUserId: number) => {
@@ -179,7 +220,18 @@ function RoomPage() {
     [sendWebRtcIceCandidate]
   );
 
-  const hasLocalVideoTrack = Boolean(localStream?.getVideoTracks().length);
+  const localCameraTrack = getCameraVideoTrack();
+  const localCameraPreviewStream = useMemo(() => {
+    if (!localCameraTrack) {
+      return null;
+    }
+    return new MediaStream([localCameraTrack]);
+  }, [localCameraTrack]);
+  const hasLocalVideoTrack = Boolean(
+    localCameraTrack &&
+      localCameraTrack.enabled &&
+      localCameraTrack.readyState === "live"
+  );
   const hasLocalAudioTrack = Boolean(localStream?.getAudioTracks().length);
 
   const displayedRtcError = rtcFlowError;
@@ -203,27 +255,42 @@ function RoomPage() {
       return "not_started";
     }
 
-    if (mediaDisabled || preferencesMediaDisabled) {
-      return "disabled_by_preferences";
-    }
-
     if (mediaLoading) {
       return "requesting_permissions";
     }
 
-    if (mediaError) {
+    if (mediaDisabled) {
+      return "failed";
+    }
+
+    if (mediaError && !hasLocalAudioTrack && !hasLocalVideoTrack) {
       return "failed";
     }
 
     if (hasLocalAudioTrack && hasLocalVideoTrack) {
+      if (audioMuted && videoOff) {
+        return "disabled_by_preferences";
+      }
+      if (videoOff) {
+        return "ready_audio_only";
+      }
+      if (audioMuted) {
+        return "ready_video_only";
+      }
       return "ready_audio_video";
     }
 
     if (hasLocalAudioTrack) {
+      if (audioMuted) {
+        return "disabled_by_preferences";
+      }
       return "ready_audio_only";
     }
 
     if (hasLocalVideoTrack) {
+      if (videoOff) {
+        return "disabled_by_preferences";
+      }
       return "ready_video_only";
     }
 
@@ -239,8 +306,9 @@ function RoomPage() {
     mediaError,
     mediaLoading,
     mediaReady,
-    preferencesMediaDisabled,
+    audioMuted,
     shouldStartLocalMedia,
+    videoOff,
   ]);
 
   const hasRtcNegotiationPrerequisites = useMemo(() => {
@@ -256,7 +324,7 @@ function RoomPage() {
       return false;
     }
 
-    if (preferencesMediaDisabled || mediaDisabled || mediaReady || Boolean(mediaError)) {
+    if (mediaDisabled || mediaReady || Boolean(mediaError)) {
       return true;
     }
 
@@ -270,7 +338,6 @@ function RoomPage() {
     mediaError,
     mediaLoading,
     mediaReady,
-    preferencesMediaDisabled,
     shouldStartLocalMedia,
   ]);
 
@@ -363,10 +430,11 @@ function RoomPage() {
   const doLeaveRoom = useCallback(() => {
     resetMeshFlowState();
     closeAllPeerConnections();
+    stopScreenShare();
     stopLocalMedia();
     leaveRoom();
     navigate("/dashboard", { replace: true });
-  }, [closeAllPeerConnections, leaveRoom, navigate, resetMeshFlowState, stopLocalMedia]);
+  }, [closeAllPeerConnections, leaveRoom, navigate, resetMeshFlowState, stopLocalMedia, stopScreenShare]);
 
   const handleLeaveRoom = useCallback(() => {
     if (isHost && !isFinalState) {
@@ -390,9 +458,39 @@ function RoomPage() {
     setIsHostLeaveDialogOpen(false);
     resetMeshFlowState();
     closeAllPeerConnections();
+    stopScreenShare();
     stopLocalMedia();
     sendEndMeeting();
-  }, [closeAllPeerConnections, resetMeshFlowState, sendEndMeeting, stopLocalMedia]);
+  }, [closeAllPeerConnections, resetMeshFlowState, sendEndMeeting, stopLocalMedia, stopScreenShare]);
+
+  const handleToggleMute = useCallback(() => {
+    setAudioMuted(!audioMuted);
+  }, [audioMuted, setAudioMuted]);
+
+  const handleToggleCamera = useCallback(() => {
+    const nextVideoOff = !videoOff;
+    setVideoOff(nextVideoOff);
+
+    if (isScreenSharing) {
+      return;
+    }
+
+    if (nextVideoOff) {
+      replaceVideoTrackForAllPeers(null);
+      return;
+    }
+
+    const cameraTrack = restoreCameraTrack();
+    replaceVideoTrackForAllPeers(cameraTrack?.enabled ? cameraTrack : null);
+  }, [isScreenSharing, replaceVideoTrackForAllPeers, restoreCameraTrack, setVideoOff, videoOff]);
+
+  const handleToggleScreenShare = useCallback(() => {
+    if (isScreenSharing) {
+      stopScreenShare();
+      return;
+    }
+    void startScreenShare();
+  }, [isScreenSharing, startScreenShare, stopScreenShare]);
 
   const handleMakeHost = useCallback((userId: number) => {
     sendHostTransfer(userId);
@@ -414,10 +512,27 @@ function RoomPage() {
   }, [audioEnabled, shouldStartLocalMedia, startLocalMedia, stopLocalMedia, videoEnabled]);
 
   useEffect(() => {
+    if (shouldStartLocalMedia) {
+      return;
+    }
+
+    stopScreenShare();
+  }, [shouldStartLocalMedia, stopScreenShare]);
+
+  useEffect(() => {
     if (isFinalState && activePanel !== null) {
       setActivePanel(null);
     }
   }, [activePanel, isFinalState]);
+
+  useEffect(() => {
+    if (!isScreenSharing) {
+      return;
+    }
+    if (screenSharerUserId !== null && screenSharerUserId !== localUserId) {
+      stopScreenShare();
+    }
+  }, [isScreenSharing, localUserId, screenSharerUserId, stopScreenShare]);
 
   useEffect(() => {
     if (pendingLeaveAfterTransferRef.current && !isHost) {
@@ -427,15 +542,29 @@ function RoomPage() {
   }, [doLeaveRoom, isHost]);
 
   useEffect(() => {
+    closeAllPeerConnectionsRef.current = closeAllPeerConnections;
+  }, [closeAllPeerConnections]);
+
+  useEffect(() => {
+    stopLocalMediaRef.current = stopLocalMedia;
+  }, [stopLocalMedia]);
+
+  useEffect(() => {
+    stopScreenShareRef.current = stopScreenShare;
+  }, [stopScreenShare]);
+
+  useEffect(() => {
     const processingSignalPeers = processingSignalPeersRef.current;
     const pendingOfferInitiations = pendingOfferInitiationsRef.current;
+
     return () => {
       processingSignalPeers.clear();
       pendingOfferInitiations.clear();
-      closeAllPeerConnections();
-      stopLocalMedia();
+      closeAllPeerConnectionsRef.current();
+      stopScreenShareRef.current();
+      stopLocalMediaRef.current();
     };
-  }, [closeAllPeerConnections, stopLocalMedia]);
+  }, []);
 
   useEffect(() => {
     const pendingIceCandidateUserIds = getUsersWithPendingRemoteIceCandidates();
@@ -816,6 +945,7 @@ function RoomPage() {
         {displayedError ? <p role="alert" style={alertStyle}>{displayedError}</p> : null}
 
         {mediaError ? <p role="alert" style={warningStyle}>{mediaError}</p> : null}
+        {screenShareError ? <p role="alert" style={warningStyle}>{screenShareError}</p> : null}
 
         {displayedRtcError ? <p role="alert" style={alertStyle}>{displayedRtcError}</p> : null}
 
@@ -854,12 +984,14 @@ function RoomPage() {
           localUserId={localUserId}
           localDisplayName={displayName}
           localStream={localStream}
+          localCameraPreviewStream={localCameraPreviewStream}
           hasLocalVideoTrack={hasLocalVideoTrack}
           hasLocalAudioTrack={hasLocalAudioTrack}
           localMediaUiState={localMediaUiState}
           peerStates={peerStates}
           meshUiState={meshUiState}
           mediaTopology={ROOM_MEDIA_TOPOLOGY}
+          screenSharerUserId={screenSharerUserId}
         />
 
         {isFinalState ? (
@@ -946,6 +1078,16 @@ function RoomPage() {
           activeCount={activeUsers.length}
           waitingCount={waitingUsers.length}
           isHost={isHost}
+          audioMuted={audioMuted}
+          videoOff={videoOff}
+          isScreenSharing={isScreenSharing}
+          isAnotherUserSharing={isAnotherUserSharing}
+          canStartScreenShare={canStartScreenShare}
+          canToggleMute={hasAudioDevice}
+          canToggleCamera={hasVideoDevice}
+          onToggleMute={handleToggleMute}
+          onToggleCamera={handleToggleCamera}
+          onToggleScreenShare={handleToggleScreenShare}
           onOpenActive={() => setActivePanel("active")}
           onOpenWaiting={() => setActivePanel("waiting")}
           onOpenChat={() => setActivePanel("chat")}
@@ -1007,6 +1149,7 @@ function RoomPage() {
             {activeUsers.map((user) => {
               const userId = user.userId;
               const canKick = userId !== null && userId !== localUserId;
+              const isCurrentSharer = userId !== null && userId === screenSharerUserId;
               const userLabel = user.label || (userId !== null ? `User ${userId}` : "Unknown user");
 
               return (
@@ -1023,29 +1166,52 @@ function RoomPage() {
                   }}
                 >
                   <span style={{ fontSize: 13.5, color: "var(--sm-fg)" }}>{userLabel}</span>
-                  {canKick ? (
-                    <button
-                      type="button"
-                      onClick={() => sendHostKickAction(userId)}
-                      disabled={hasHostActionPending}
-                      className="sm-press"
-                      style={{
-                        height: 32,
-                        padding: "0 12px",
-                        borderRadius: 10,
-                        border: 0,
-                        background: "var(--sm-danger-soft)",
-                        color: "var(--sm-danger)",
-                        fontSize: 12.5,
-                        fontWeight: 500,
-                        cursor: hasHostActionPending ? "not-allowed" : "pointer",
-                        opacity: hasHostActionPending ? 0.6 : 1,
-                        fontFamily: "var(--sm-font-text)",
-                      }}
-                    >
-                      Remove
-                    </button>
-                  ) : null}
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                    {isCurrentSharer && userId !== null ? (
+                      <button
+                        type="button"
+                        onClick={() => sendHostScreenStop(userId)}
+                        className="sm-press"
+                        style={{
+                          height: 32,
+                          padding: "0 12px",
+                          borderRadius: 10,
+                          border: 0,
+                          background: "rgba(77,156,255,0.22)",
+                          color: "#9CC9FF",
+                          fontSize: 12.5,
+                          fontWeight: 500,
+                          cursor: "pointer",
+                          fontFamily: "var(--sm-font-text)",
+                        }}
+                      >
+                        Stop share
+                      </button>
+                    ) : null}
+                    {canKick ? (
+                      <button
+                        type="button"
+                        onClick={() => sendHostKickAction(userId)}
+                        disabled={hasHostActionPending}
+                        className="sm-press"
+                        style={{
+                          height: 32,
+                          padding: "0 12px",
+                          borderRadius: 10,
+                          border: 0,
+                          background: "var(--sm-danger-soft)",
+                          color: "var(--sm-danger)",
+                          fontSize: 12.5,
+                          fontWeight: 500,
+                          cursor: hasHostActionPending ? "not-allowed" : "pointer",
+                          opacity: hasHostActionPending ? 0.6 : 1,
+                          fontFamily: "var(--sm-font-text)",
+                        }}
+                      >
+                        Remove
+                      </button>
+                    ) : null}
+                  </div>
                 </li>
               );
             })}
