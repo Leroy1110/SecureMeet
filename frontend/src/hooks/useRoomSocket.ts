@@ -14,7 +14,16 @@ export type ConnectionStatus = "connecting" | "open" | "connected" | "closed" | 
 export type SessionStatus = "unknown" | "waiting" | "active" | "rejected" | "kicked" | "disconnected" | "error";
 export type HostMemberActionType = "waiting.approve" | "waiting.reject" | "member.kick";
 export type WebRtcMessageType = "webrtc.offer" | "webrtc.answer" | "webrtc.ice_candidate";
-export type OutgoingMessageType = HostMemberActionType | "chat.send" | WebRtcMessageType | "room.leave" | "host.transfer" | "room.end";
+export type OutgoingMessageType =
+  | HostMemberActionType
+  | "chat.send"
+  | WebRtcMessageType
+  | "room.leave"
+  | "host.transfer"
+  | "room.end"
+  | "screen.share.start"
+  | "screen.share.stop"
+  | "host.screen.stop";
 type PendingHostActionTargetScope = "waiting" | "active" | "either";
 type PendingHostAction = {
   type: HostMemberActionType;
@@ -78,6 +87,8 @@ export type UseRoomSocketResult = {
   chatRecipientOptions: ChatRecipientOption[];
   queuedWebRtcSignals: QueuedWebRtcSignal[];
   localUserId: number | null;
+  screenSharerUserId: number | null;
+  forceStopScreenShareNonce: number;
   hasPrerequisites: boolean;
   normalizedRoomCode: string;
   prerequisiteErrors: string[];
@@ -94,7 +105,10 @@ export type UseRoomSocketResult = {
   sendHostWaitingAction: (messageType: "waiting.approve" | "waiting.reject", userId: number | null) => void;
   sendHostKickAction: (userId: number | null) => void;
   sendHostTransfer: (toUserId: number) => boolean;
+  sendHostScreenStop: (userId: number) => boolean;
   sendEndMeeting: () => boolean;
+  sendScreenShareStart: () => boolean;
+  sendScreenShareStop: () => boolean;
   sendChatMessage: (event: FormEvent<HTMLFormElement>) => void;
   sendWebRtcOffer: (toUserId: number | null, sdp: string) => boolean;
   sendWebRtcAnswer: (toUserId: number | null, sdp: string) => boolean;
@@ -136,6 +150,11 @@ const WEBRTC_ERROR_FRAGMENTS = [
   "failed to relay webrtc",
   "invalid sdp in payload",
   "invalid candidate",
+  "only host or active users can start screen share",
+  "only host or active users can stop screen share",
+  "another user is currently sharing",
+  "only host can stop another user's screen share",
+  "target user is not currently sharing",
 ];
 const CHAT_ERROR_FRAGMENTS = [
   "chat",
@@ -364,6 +383,8 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
   const [selectedRecipientUserId, setSelectedRecipientUserId] = useState<number | null>(null);
   const [queuedWebRtcSignals, setQueuedWebRtcSignals] = useState<QueuedWebRtcSignal[]>([]);
   const [localUserId, setLocalUserId] = useState<number | null>(() => readUserIdFromToken(roomToken));
+  const [screenSharerUserId, setScreenSharerUserId] = useState<number | null>(null);
+  const [forceStopScreenShareNonce, setForceStopScreenShareNonce] = useState(0);
   const socketRef = useRef<WebSocket | null>(null);
   const lastOutgoingMessageTypeRef = useRef<OutgoingMessageType | null>(null);
   const nextQueuedSignalIdRef = useRef(1);
@@ -401,6 +422,8 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
     setSelectedRecipientUserId(null);
     setQueuedWebRtcSignals([]);
     setLocalUserId(null);
+    setScreenSharerUserId(null);
+    setForceStopScreenShareNonce(0);
     nextQueuedSignalIdRef.current = 1;
   }, []);
 
@@ -594,6 +617,10 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
     sendHostMemberAction("member.kick", userId);
   };
 
+  const canSendChat = sessionStatus === "active" || role === "host";
+  const canSendWebRtc = sessionStatus === "active" || role === "host";
+  const isSocketOpen = connectionStatus === "open" || connectionStatus === "connected";
+
   const sendHostTransfer = useCallback((toUserId: number): boolean => {
     if (role !== "host") {
       return false;
@@ -639,9 +666,76 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
     }
   }, [role]);
 
-  const canSendChat = sessionStatus === "active" || role === "host";
-  const canSendWebRtc = sessionStatus === "active" || role === "host";
-  const isSocketOpen = connectionStatus === "open" || connectionStatus === "connected";
+  const sendScreenShareStart = useCallback((): boolean => {
+    if (!canSendWebRtc) {
+      setLastError("Only host or active users can start screen sharing.");
+      return false;
+    }
+
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN || !isSocketOpen) {
+      setLastError("Cannot start screen sharing while room socket is not connected.");
+      return false;
+    }
+
+    try {
+      lastOutgoingMessageTypeRef.current = "screen.share.start";
+      socket.send(JSON.stringify({ type: "screen.share.start", payload: {} }));
+      return true;
+    } catch {
+      lastOutgoingMessageTypeRef.current = null;
+      setLastError("Failed to start screen sharing.");
+      return false;
+    }
+  }, [canSendWebRtc, isSocketOpen]);
+
+  const sendScreenShareStop = useCallback((): boolean => {
+    if (!canSendWebRtc) {
+      return false;
+    }
+
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN || !isSocketOpen) {
+      return false;
+    }
+
+    try {
+      lastOutgoingMessageTypeRef.current = "screen.share.stop";
+      socket.send(JSON.stringify({ type: "screen.share.stop", payload: {} }));
+      return true;
+    } catch {
+      lastOutgoingMessageTypeRef.current = null;
+      return false;
+    }
+  }, [canSendWebRtc, isSocketOpen]);
+
+  const sendHostScreenStop = useCallback((userId: number): boolean => {
+    if (role !== "host") {
+      return false;
+    }
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return false;
+    }
+
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN || !isSocketOpen) {
+      return false;
+    }
+
+    try {
+      lastOutgoingMessageTypeRef.current = "host.screen.stop";
+      socket.send(
+        JSON.stringify({
+          type: "host.screen.stop",
+          payload: { user_id: userId },
+        })
+      );
+      return true;
+    } catch {
+      lastOutgoingMessageTypeRef.current = null;
+      return false;
+    }
+  }, [isSocketOpen, role]);
   const chatRecipientOptions = useMemo<ChatRecipientOption[]>(() => {
     const optionsByUserId = new Map<number, ChatRecipientOption>();
 
@@ -1134,6 +1228,13 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
             const active = resolveList(payloadValue, ["active_users", "active", "users"]);
             setWaitingUsers(waiting);
             setActiveUsers(active);
+            if ("screen_sharer_user_id" in payloadValue || "screenSharerUserId" in payloadValue) {
+              setScreenSharerUserId(
+                parseNullableInteger(payloadValue.screen_sharer_user_id ?? payloadValue.screenSharerUserId)
+              );
+            } else {
+              setScreenSharerUserId(null);
+            }
           }
           break;
         }
@@ -1171,6 +1272,7 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
           clearPersistedRoomSession();
           setRoomState("rejected");
           setSessionStatus("rejected");
+          setScreenSharerUserId(null);
           setLastError("You were not admitted to this room.");
           break;
         }
@@ -1210,6 +1312,7 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
             ? pickString(payloadValue, ["message", "detail", "error"])
             : "";
           setSessionStatus("kicked");
+          setScreenSharerUserId(null);
           setLastError(message || "You were removed from this room.");
           socket.close();
           break;
@@ -1225,6 +1328,7 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
             : "";
           setSessionStatus("disconnected");
           setRoomState("disconnected");
+          setScreenSharerUserId(null);
           setConnectionStatus("closed");
           setLastError(message || "This session was disconnected, likely replaced by a newer connection.");
           socket.close();
@@ -1265,6 +1369,7 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
             : "";
           setSessionStatus("disconnected");
           setRoomState("disconnected");
+          setScreenSharerUserId(null);
           setConnectionStatus("closed");
           setLastError(endReason || "The meeting was ended by the host.");
           socket.close();
@@ -1333,6 +1438,26 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
           }
           break;
         }
+        case "screen.share.state": {
+          if (!isJsonRecord(payloadValue)) {
+            break;
+          }
+          setScreenSharerUserId(
+            parseNullableInteger(payloadValue.user_id ?? payloadValue.userId)
+          );
+          if (
+            lastOutgoingMessageTypeRef.current === "screen.share.start" ||
+            lastOutgoingMessageTypeRef.current === "screen.share.stop" ||
+            lastOutgoingMessageTypeRef.current === "host.screen.stop"
+          ) {
+            lastOutgoingMessageTypeRef.current = null;
+          }
+          break;
+        }
+        case "screen.share.force_stop": {
+          setForceStopScreenShareNonce((previousNonce) => previousNonce + 1);
+          break;
+        }
         case "error": {
           const message = isJsonRecord(payloadValue)
             ? pickString(payloadValue, ["message", "detail", "error"])
@@ -1343,10 +1468,14 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
             lastOutgoingMessageTypeRef.current === "webrtc.offer" ||
             lastOutgoingMessageTypeRef.current === "webrtc.answer" ||
             lastOutgoingMessageTypeRef.current === "webrtc.ice_candidate" ||
+            lastOutgoingMessageTypeRef.current === "screen.share.start" ||
+            lastOutgoingMessageTypeRef.current === "screen.share.stop" ||
+            lastOutgoingMessageTypeRef.current === "host.screen.stop" ||
             WEBRTC_ERROR_FRAGMENTS.some((fragment) => normalizedMessage.includes(fragment)) ||
             normalizedMessage.includes("webrtc") ||
             normalizedMessage.includes("sdp") ||
-            normalizedMessage.includes("candidate");
+            normalizedMessage.includes("candidate") ||
+            normalizedMessage.includes("screen share");
           if (isWebRtcRelatedError) {
             setLastError(message || "Failed to exchange WebRTC signaling data.");
             lastOutgoingMessageTypeRef.current = null;
@@ -1448,6 +1577,8 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
     chatRecipientOptions,
     queuedWebRtcSignals,
     localUserId,
+    screenSharerUserId,
+    forceStopScreenShareNonce,
     hasPrerequisites,
     normalizedRoomCode,
     prerequisiteErrors,
@@ -1465,7 +1596,10 @@ export const useRoomSocket = ({ roomCode }: UseRoomSocketParams): UseRoomSocketR
     sendHostWaitingAction,
     sendHostKickAction,
     sendHostTransfer,
+    sendHostScreenStop,
     sendEndMeeting,
+    sendScreenShareStart,
+    sendScreenShareStop,
     sendChatMessage,
     sendWebRtcOffer,
     sendWebRtcAnswer,
