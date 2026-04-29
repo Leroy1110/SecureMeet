@@ -167,7 +167,10 @@ def test_handler_screen_share_start_rejects_when_another_user_is_sharing(
 
     assert room_state.screen_sharer_user_id == host.id
     error_messages = _messages_of_type(participant_ws, "error")
-    assert error_messages[-1]["payload"]["message"] == "another user is currently sharing their screen"
+    assert (
+        error_messages[-1]["payload"]["message"]
+        == "another user is currently sharing their screen"
+    )
 
 
 def test_handler_host_screen_stop_forces_target_to_stop_and_clears_state(
