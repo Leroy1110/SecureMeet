@@ -11,7 +11,6 @@ export default function SmLogo({
   withWordmark = true,
   className,
 }: SmLogoProps) {
-  const bgColor = "#0090FF";
   const shackleColor = inverse ? "rgba(255,255,255,0.85)" : "#0090FF";
   const bodyColor = inverse ? "#ffffff" : "#0090FF";
   const keyholeColor = inverse ? "#0090FF" : "#ffffff";
