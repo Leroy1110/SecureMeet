@@ -1,33 +1,30 @@
-import { useState } from "react";
-import { useMotionValueEvent, useScroll } from "framer-motion";
-import {
-  FeaturesSection,
-  FinalCtaSection,
-  HeroSection,
-  HowItWorksSection,
-  LandingFooter,
-  LandingNavbar,
-  SecuritySection,
-  TrustBarSection,
-} from "./sections";
+import { useLandingTheme } from "./hooks/useLandingTheme";
+import { ClosingCtaSection } from "./sections/ClosingCtaSection";
+import { HeroSection } from "./sections/HeroSection";
+import { LandingFooter } from "./sections/LandingFooter";
+import { LandingNavbar } from "./sections/LandingNavbar";
+import { PillarsSection } from "./sections/PillarsSection";
+import { SmallFeaturesSection } from "./sections/SmallFeaturesSection";
 
 function LandingPageContent() {
-  const { scrollY } = useScroll();
-  const [scrolled, setScrolled] = useState(false);
-
-  useMotionValueEvent(scrollY, "change", (latest) => {
-    setScrolled(latest > 20);
-  });
+  const { theme, setTheme } = useLandingTheme();
 
   return (
-    <div className="min-h-screen bg-white pt-3 dark:bg-[#020617]">
-      <LandingNavbar scrolled={scrolled} />
+    <div
+      style={{
+        background: "var(--sm-bg)",
+        color: "var(--sm-fg)",
+        fontFamily: "var(--sm-font-text)",
+        minHeight: "100%",
+        overflow: "hidden",
+        transition: "background 360ms cubic-bezier(0.32, 0.72, 0, 1), color 360ms",
+      }}
+    >
+      <LandingNavbar theme={theme} setTheme={setTheme} />
       <HeroSection />
-      <TrustBarSection />
-      <FeaturesSection />
-      <HowItWorksSection />
-      <SecuritySection />
-      <FinalCtaSection />
+      <PillarsSection />
+      <SmallFeaturesSection />
+      <ClosingCtaSection />
       <LandingFooter />
     </div>
   );

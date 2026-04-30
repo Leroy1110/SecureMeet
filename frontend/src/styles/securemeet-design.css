@@ -85,6 +85,39 @@
 
   --sm-blur-sm: saturate(180%) blur(10px);
   --sm-blur-md: saturate(180%) blur(20px);
+  --sm-blur-lg: saturate(180%) blur(40px);
+
+  /* Tokens that stay constant across themes (primary CTA + dark stage) */
+  --sm-graphite:       #0A0A0C;
+  --sm-graphite-hover: #1A1B20;
+
+  --sm-accent-ring:    rgba(0, 92, 230, 0.18);
+}
+
+/* ---------- Dark mode (class-based) ---------- */
+:root.sm-dark {
+  --sm-bg:          #0A0A0C;
+  --sm-bg-elev-1:   #141518;
+  --sm-bg-elev-2:   rgba(22,23,27,0.72);
+  --sm-bg-sunken:   #0F1013;
+  --sm-bg-tint:     #1B1C21;
+  --sm-overlay:     rgba(0,0,0,0.52);
+
+  --sm-fg:          #F5F5F7;
+  --sm-fg-muted:    #A8A9B3;
+  --sm-fg-subtle:   #6C6D78;
+  --sm-fg-inverse:  #0A0A0C;
+
+  --sm-line:        rgba(255,255,255,0.08);
+  --sm-line-strong: rgba(255,255,255,0.16);
+
+  --sm-accent:       #4D9CFF;
+  --sm-accent-press: #2F82F0;
+  --sm-accent-soft:  rgba(77,156,255,0.14);
+
+  --sm-success-soft:#0E2A1E;
+  --sm-warn-soft:   #2E2412;
+  --sm-danger-soft: #2E1612;
 }
 
 /* ---------- Global root body ---------- */
