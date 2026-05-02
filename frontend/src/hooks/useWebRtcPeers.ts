@@ -23,6 +23,7 @@ export type UseWebRtcPeersResult = {
   hasInitiatedOffer: (userId: number) => boolean;
   markAwaitingAnswer: (userId: number, awaiting: boolean) => void;
   isAwaitingAnswer: (userId: number) => boolean;
+  replaceVideoTrackForAllPeers: (newTrack: MediaStreamTrack | null) => void;
 };
 
 type PeerEntry = {
@@ -35,6 +36,7 @@ type PeerEntry = {
   disconnectErrorTimeout: number | null;
   hasInitiatedOffer: boolean;
   isAwaitingAnswer: boolean;
+  videoSender: RTCRtpSender | null;
 };
 
 const DEFAULT_ICE_SERVERS: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
@@ -57,6 +59,10 @@ const addLocalTracks = (peerConnection: RTCPeerConnection, localStream: MediaStr
     return;
   }
 
+  const hasVideoTransceiver = peerConnection
+    .getTransceivers()
+    .some((transceiver) => transceiver.receiver.track.kind === "video");
+
   const existingTrackIds = new Set(
     peerConnection
       .getSenders()
@@ -65,6 +71,10 @@ const addLocalTracks = (peerConnection: RTCPeerConnection, localStream: MediaStr
   );
 
   for (const track of localStream.getTracks()) {
+    if (track.kind === "video" && hasVideoTransceiver) {
+      continue;
+    }
+
     if (existingTrackIds.has(track.id)) {
       continue;
     }
@@ -72,6 +82,49 @@ const addLocalTracks = (peerConnection: RTCPeerConnection, localStream: MediaStr
     peerConnection.addTrack(track, localStream);
     existingTrackIds.add(track.id);
   }
+};
+
+const toVideoSender = (peerConnection: RTCPeerConnection): RTCRtpSender | null => {
+  for (const transceiver of peerConnection.getTransceivers()) {
+    if (transceiver.receiver.track.kind === "video") {
+      return transceiver.sender;
+    }
+  }
+  return peerConnection.getSenders().find((sender) => sender.track?.kind === "video") ?? null;
+};
+
+const ensureVideoSender = (entry: PeerEntry): RTCRtpSender | null => {
+  if (entry.videoSender) {
+    return entry.videoSender;
+  }
+
+  const existingSender = toVideoSender(entry.peerConnection);
+  if (existingSender) {
+    entry.videoSender = existingSender;
+    return existingSender;
+  }
+
+  try {
+    const transceiver = entry.peerConnection.addTransceiver("video", { direction: "sendrecv" });
+    entry.videoSender = transceiver.sender;
+    return entry.videoSender;
+  } catch {
+    return null;
+  }
+};
+
+const resolveActiveOutgoingVideoTrack = (localStream: MediaStream | null): MediaStreamTrack | null => {
+  if (!localStream) {
+    return null;
+  }
+
+  for (const track of localStream.getVideoTracks()) {
+    if (track.enabled && track.readyState === "live") {
+      return track;
+    }
+  }
+
+  return null;
 };
 
 const isPeerConnectionReusable = (connection: RTCPeerConnection): boolean =>
@@ -162,6 +215,17 @@ export const useWebRtcPeers = (): UseWebRtcPeersResult => {
         try {
           existingEntry.peerConnection.onicecandidate = onIceCandidate;
           addLocalTracks(existingEntry.peerConnection, localStream);
+
+          const currentVideoTrack = resolveActiveOutgoingVideoTrack(localStream);
+          const videoSender = ensureVideoSender(existingEntry);
+          if (videoSender && videoSender.track?.id !== currentVideoTrack?.id) {
+            void videoSender.replaceTrack(currentVideoTrack).catch((error) => {
+              console.warn("Failed to synchronize current local video track for peer.", {
+                userId,
+                error: toRtcErrorMessage(error, "Failed to synchronize local video track."),
+              });
+            });
+          }
         } catch (error) {
           existingEntry.error = toRtcErrorMessage(error, "Failed to attach local media tracks.");
           publishPeerStates();
@@ -195,6 +259,7 @@ export const useWebRtcPeers = (): UseWebRtcPeersResult => {
         disconnectErrorTimeout: null,
         hasInitiatedOffer: false,
         isAwaitingAnswer: false,
+        videoSender: null,
       };
 
       nextPeerConnection.ontrack = (event) => {
@@ -220,6 +285,19 @@ export const useWebRtcPeers = (): UseWebRtcPeersResult => {
           fallbackStream.addTrack(event.track);
           currentEntry.remoteStream = fallbackStream;
         }
+
+        // Remote camera/screen mute/unmute does not create a new stream object.
+        // Re-publish snapshot when track state changes so tiles update reliably.
+        const publishIfCurrent = () => {
+          const latestEntry = peersRef.current.get(userId);
+          if (!latestEntry || latestEntry.peerConnection !== nextPeerConnection) {
+            return;
+          }
+          publishPeerStates();
+        };
+        event.track.onmute = publishIfCurrent;
+        event.track.onunmute = publishIfCurrent;
+        event.track.onended = publishIfCurrent;
 
         publishPeerStates();
       };
@@ -309,6 +387,13 @@ export const useWebRtcPeers = (): UseWebRtcPeersResult => {
 
       try {
         addLocalTracks(nextPeerConnection, localStream);
+        entry.videoSender = ensureVideoSender(entry);
+        const currentVideoTrack = resolveActiveOutgoingVideoTrack(localStream);
+        if (entry.videoSender && entry.videoSender.track?.id !== currentVideoTrack?.id) {
+          void entry.videoSender.replaceTrack(currentVideoTrack).catch((error) => {
+            entry.error = toRtcErrorMessage(error, "Failed to attach local video track.");
+          });
+        }
       } catch (error) {
         entry.error = toRtcErrorMessage(error, "Failed to attach local media tracks.");
       }
@@ -381,6 +466,22 @@ export const useWebRtcPeers = (): UseWebRtcPeersResult => {
     return entry ? entry.isAwaitingAnswer : false;
   }, []);
 
+  const replaceVideoTrackForAllPeers = useCallback((newTrack: MediaStreamTrack | null) => {
+    for (const [userId, entry] of peersRef.current.entries()) {
+      const videoSender = ensureVideoSender(entry);
+      if (!videoSender) {
+        continue;
+      }
+
+      void videoSender.replaceTrack(newTrack).catch((error) => {
+        console.warn("Failed to replace video track for peer.", {
+          userId,
+          error: toRtcErrorMessage(error, "Failed to replace outgoing video track."),
+        });
+      });
+    }
+  }, []);
+
   useEffect(() => {
     return () => {
       closeAllPeerConnections();
@@ -400,5 +501,6 @@ export const useWebRtcPeers = (): UseWebRtcPeersResult => {
     hasInitiatedOffer,
     markAwaitingAnswer,
     isAwaitingAnswer,
+    replaceVideoTrackForAllPeers,
   };
 };

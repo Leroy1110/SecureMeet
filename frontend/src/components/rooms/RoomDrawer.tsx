@@ -1,4 +1,5 @@
 import { type ReactNode } from "react";
+import { SmIcon } from "../sm";
 
 type RoomDrawerProps = {
   isOpen: boolean;
@@ -14,28 +15,104 @@ const RoomDrawer = ({ isOpen, title, description, onClose, children }: RoomDrawe
   }
 
   return (
-    <div className="fixed inset-0 z-50">
+    <div style={{ position: "fixed", inset: 0, zIndex: 50 }}>
       <button
         type="button"
         aria-label="Close panel"
         onClick={onClose}
-        className="absolute inset-0 bg-slate-900/45 backdrop-blur-[2px]"
+        style={{
+          position: "absolute",
+          inset: 0,
+          background: "var(--sm-overlay)",
+          backdropFilter: "var(--sm-blur-sm)",
+          WebkitBackdropFilter: "var(--sm-blur-sm)",
+          border: 0,
+          cursor: "pointer",
+        }}
       />
-      <aside className="absolute inset-y-0 right-0 flex w-full max-w-full flex-col border-l border-slate-200 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.65)] dark:border-slate-800 dark:bg-slate-950 sm:w-[430px]">
-        <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+      <aside
+        style={{
+          position: "absolute",
+          top: 0,
+          right: 0,
+          bottom: 0,
+          width: "100%",
+          maxWidth: 440,
+          display: "flex",
+          flexDirection: "column",
+          background: "#fff",
+          boxShadow: "var(--sm-shadow-xl)",
+          borderLeft: "1px solid var(--sm-line)",
+          borderTopLeftRadius: 28,
+          borderBottomLeftRadius: 28,
+          overflow: "hidden",
+        }}
+      >
+        <header
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+            gap: 16,
+            padding: "22px 24px 18px",
+            borderBottom: "1px solid var(--sm-line)",
+          }}
+        >
           <div>
-            <h2 className="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">{title}</h2>
-            <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{description}</p>
+            <h2
+              style={{
+                margin: 0,
+                fontSize: 20,
+                fontWeight: 600,
+                letterSpacing: "-0.02em",
+                color: "var(--sm-fg)",
+              }}
+            >
+              {title}
+            </h2>
+            <p
+              style={{
+                margin: "4px 0 0",
+                fontSize: 13,
+                lineHeight: 1.5,
+                color: "var(--sm-fg-muted)",
+              }}
+            >
+              {description}
+            </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+            className="sm-press"
+            aria-label="Close panel"
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: 999,
+              border: 0,
+              background: "var(--sm-bg-tint)",
+              color: "var(--sm-fg-muted)",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              flexShrink: 0,
+            }}
           >
-            Close
+            <SmIcon name="x" size={14} />
           </button>
         </header>
-        <div className="min-h-0 flex-1 overflow-y-auto p-5">{children}</div>
+        <div
+          style={{
+            minHeight: 0,
+            flex: 1,
+            overflowY: "auto",
+            padding: "20px 24px",
+          }}
+        >
+          {children}
+        </div>
       </aside>
     </div>
   );

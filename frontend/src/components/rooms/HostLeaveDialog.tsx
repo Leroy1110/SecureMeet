@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { type RoomPresenceUser } from "../../hooks/useRoomSocket";
+import { SmButton } from "../sm";
 
 const getPresenceUserLabel = (user: RoomPresenceUser): string => {
   if (user.label.trim()) {
@@ -11,6 +12,12 @@ const getPresenceUserLabel = (user: RoomPresenceUser): string => {
   }
 
   return "Unknown user";
+};
+
+const initialsFor = (value: string): string => {
+  const parts = value.trim().split(/\s+/).filter(Boolean).slice(0, 2);
+  if (!parts.length) return "?";
+  return parts.map((p) => p.charAt(0).toUpperCase()).join("");
 };
 
 type HostLeaveDialogProps = {
@@ -55,32 +62,83 @@ const HostLeaveDialog = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 60,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 20,
+      }}
+    >
       <button
         type="button"
         aria-label="Close dialog"
         onClick={handleCancel}
-        className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm"
+        style={{
+          position: "absolute",
+          inset: 0,
+          border: 0,
+          cursor: "pointer",
+          background: "var(--sm-overlay)",
+          backdropFilter: "var(--sm-blur-sm)",
+          WebkitBackdropFilter: "var(--sm-blur-sm)",
+        }}
       />
-      <div className="relative w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-950">
+      <div
+        role="dialog"
+        aria-modal="true"
+        style={{
+          position: "relative",
+          width: "100%",
+          maxWidth: 420,
+          background: "#fff",
+          borderRadius: 28,
+          padding: 28,
+          boxShadow: "var(--sm-shadow-xl)",
+        }}
+      >
         {step === "select" ? (
           <>
-            <h2 className="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">
+            <h2
+              className="sm-h2"
+              style={{ margin: 0, fontSize: 22, letterSpacing: "-0.02em" }}
+            >
               Leave meeting
             </h2>
-            <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-              You are the host. Choose how to leave.
+            <p
+              style={{
+                margin: "6px 0 0",
+                fontSize: 13.5,
+                lineHeight: 1.5,
+                color: "var(--sm-fg-muted)",
+              }}
+            >
+              You're the host. Pick how to end your participation.
             </p>
 
             {hasOtherParticipants ? (
-              <div className="mt-5">
-                <p className="mb-2 text-sm font-semibold text-slate-800 dark:text-slate-200">
-                  Transfer host &amp; leave
+              <div style={{ marginTop: 22 }}>
+                <p
+                  className="sm-eyebrow"
+                  style={{ marginBottom: 10, fontSize: 10.5 }}
+                >
+                  Transfer host & leave
                 </p>
-                <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
-                  Select a participant to become the new host. You will leave after the transfer.
-                </p>
-                <ul className="space-y-2">
+                <ul
+                  style={{
+                    listStyle: "none",
+                    padding: 0,
+                    margin: 0,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                    maxHeight: 220,
+                    overflowY: "auto",
+                  }}
+                >
                   {otherParticipants.map((user) => {
                     const userLabel = getPresenceUserLabel(user);
                     const userId = user.userId!;
@@ -90,75 +148,122 @@ const HostLeaveDialog = ({
                         <button
                           type="button"
                           onClick={() => onTransferAndLeave(userId)}
-                          className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-left text-sm font-medium text-slate-800 transition hover:border-amber-300 hover:bg-amber-50 hover:text-amber-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:border-amber-900/50 dark:hover:bg-amber-950/30 dark:hover:text-amber-300"
+                          className="sm-press"
+                          style={{
+                            width: "100%",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 10,
+                            padding: "10px 12px",
+                            borderRadius: 14,
+                            border: 0,
+                            background: "var(--sm-bg-sunken)",
+                            color: "var(--sm-fg)",
+                            textAlign: "left",
+                            cursor: "pointer",
+                            fontFamily: "var(--sm-font-text)",
+                          }}
                         >
-                          Transfer to {userLabel} &amp; leave
+                          <span
+                            style={{
+                              width: 30,
+                              height: 30,
+                              borderRadius: 999,
+                              background: "var(--sm-fg)",
+                              color: "#F5F5F7",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontSize: 11.5,
+                              fontWeight: 600,
+                              flexShrink: 0,
+                            }}
+                          >
+                            {initialsFor(userLabel)}
+                          </span>
+                          <span style={{ fontSize: 13.5, fontWeight: 500 }}>
+                            Transfer to {userLabel}
+                          </span>
                         </button>
                       </li>
                     );
                   })}
                 </ul>
-
-                <div className="my-4 border-t border-slate-200 dark:border-slate-800" />
               </div>
             ) : null}
 
-            <div className={hasOtherParticipants ? "" : "mt-5"}>
-              <p className="mb-2 text-sm font-semibold text-slate-800 dark:text-slate-200">
-                End meeting for all
+            <div
+              style={{
+                marginTop: hasOtherParticipants ? 22 : 18,
+                paddingTop: hasOtherParticipants ? 18 : 0,
+                borderTop: hasOtherParticipants ? "1px solid var(--sm-line)" : "none",
+              }}
+            >
+              <p
+                className="sm-eyebrow"
+                style={{ marginBottom: 8, fontSize: 10.5 }}
+              >
+                End meeting for everyone
               </p>
-              <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
-                This will immediately close the meeting for all participants.
+              <p
+                style={{
+                  margin: "0 0 10px",
+                  fontSize: 12.5,
+                  color: "var(--sm-fg-muted)",
+                }}
+              >
+                Closes the room immediately for all participants.
               </p>
-              <button
-                type="button"
+              <SmButton
+                variant="danger"
+                size="md"
+                fullWidth
                 onClick={handleOpenConfirmEnd}
-                className="w-full rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-700 transition hover:bg-red-100 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/60"
               >
                 End meeting for all
-              </button>
+              </SmButton>
             </div>
 
-            <button
-              type="button"
-              onClick={handleCancel}
-              className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-            >
-              Cancel
-            </button>
+            <div style={{ marginTop: 10 }}>
+              <SmButton
+                variant="ghost"
+                size="md"
+                fullWidth
+                onClick={handleCancel}
+              >
+                Cancel
+              </SmButton>
+            </div>
           </>
         ) : (
           <>
-            <h2 className="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">
+            <h2
+              className="sm-h2"
+              style={{ margin: 0, fontSize: 22, letterSpacing: "-0.02em" }}
+            >
               End meeting for all?
             </h2>
-            <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-              All participants will be immediately disconnected and the room will be closed. This
-              cannot be undone.
+            <p
+              style={{
+                margin: "10px 0 0",
+                fontSize: 13.5,
+                lineHeight: 1.5,
+                color: "var(--sm-fg-muted)",
+              }}
+            >
+              Every participant will be disconnected and the room will close. This can't be undone.
             </p>
 
-            <div className="mt-5 flex flex-col gap-2">
-              <button
-                type="button"
-                onClick={onEndMeeting}
-                className="w-full rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-700 transition hover:bg-red-100 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/60"
-              >
-                End meeting for all
-              </button>
-              <button
-                type="button"
-                onClick={handleBack}
-                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-              >
+            <div style={{ marginTop: 22, display: "flex", flexDirection: "column", gap: 8 }}>
+              <SmButton variant="danger" size="md" fullWidth onClick={onEndMeeting}>
+                End meeting
+              </SmButton>
+              <SmButton variant="secondary" size="md" fullWidth onClick={handleBack}>
                 Back
-              </button>
-              <button
-                type="button"
-                onClick={handleCancel}
-                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-500 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-800"
-              >
+              </SmButton>
+              <SmButton variant="ghost" size="md" fullWidth onClick={handleCancel}>
                 Cancel
-              </button>
+              </SmButton>
             </div>
           </>
         )}

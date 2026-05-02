@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { SmLogo } from "../sm";
 
 type AuthCardLayoutProps = {
   title: string;
@@ -14,16 +15,62 @@ function AuthCardLayout({
   children,
 }: AuthCardLayoutProps) {
   return (
-    <section className="flex min-h-screen items-center justify-center bg-slate-100 px-4 py-10 dark:bg-slate-950">
-      <div className="w-full max-w-lg rounded-3xl border border-slate-200 bg-white/95 p-8 shadow-sm backdrop-blur sm:p-10 dark:border-slate-700 dark:bg-slate-900/95">
-        <header className="mb-8 text-center">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
-            SecureMeet
-          </p>
-          <h1 className="mt-4 text-3xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
+    <section
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "40px 20px",
+        background: "var(--sm-bg-sunken)",
+        position: "relative",
+        overflow: "hidden",
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          pointerEvents: "none",
+          background:
+            "radial-gradient(45% 55% at 50% 20%, rgba(0, 92, 230, 0.05), transparent 70%)",
+        }}
+      />
+
+      <div
+        style={{
+          position: "relative",
+          width: "100%",
+          maxWidth: 460,
+          background: "#fff",
+          borderRadius: 28,
+          padding: "40px 36px",
+          boxShadow: "inset 0 0 0 1px var(--sm-line), var(--sm-shadow-md)",
+        }}
+      >
+        <header style={{ textAlign: "center", marginBottom: 32 }}>
+          <div style={{ display: "flex", justifyContent: "center" }}>
+            <SmLogo size={28} withWordmark={false} />
+          </div>
+          <h1
+            className="sm-h2"
+            style={{
+              margin: "18px 0 8px",
+              fontSize: 30,
+              letterSpacing: "-0.025em",
+            }}
+          >
             {title}
           </h1>
-          <p className="mx-auto mt-3 max-w-sm text-sm leading-relaxed text-slate-600 dark:text-slate-300">
+          <p
+            style={{
+              margin: "0 auto",
+              maxWidth: 340,
+              fontSize: 14.5,
+              lineHeight: 1.5,
+              color: "var(--sm-fg-muted)",
+            }}
+          >
             {description}
           </p>
         </header>
@@ -31,7 +78,16 @@ function AuthCardLayout({
         {children}
 
         {footer ? (
-          <footer className="mt-8 border-t border-slate-200 pt-5 text-center text-sm text-slate-600 dark:border-slate-700 dark:text-slate-300">
+          <footer
+            style={{
+              marginTop: 28,
+              paddingTop: 20,
+              borderTop: "1px solid var(--sm-line)",
+              textAlign: "center",
+              fontSize: 13.5,
+              color: "var(--sm-fg-muted)",
+            }}
+          >
             {footer}
           </footer>
         ) : null}

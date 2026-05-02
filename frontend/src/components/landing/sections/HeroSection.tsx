@@ -1,70 +1,192 @@
-import { motion } from "framer-motion";
-import { Link } from "react-router-dom";
-import { fadeInUp, staggerContainer, transition } from "../motion";
+import { useEffect, useState } from "react";
+import ProductPreview from "../ProductPreview";
+import { LandingButton } from "../shared/LandingButton";
+import { LandingIcon } from "../shared/icons";
 
-function HeroSection() {
+export function HeroSection() {
+  const [parY, setParY] = useState(0);
+
+  useEffect(() => {
+    const onScroll = () => setParY(window.scrollY * 0.06);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
   return (
-    <section className="relative flex min-h-[88vh] items-center justify-center overflow-hidden px-4 pb-16 pt-20 sm:pt-24">
-      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(248,250,252,0.95)_52%,rgba(241,245,249,0.95)_100%)] dark:bg-[linear-gradient(180deg,rgba(2,6,23,0.98)_0%,rgba(2,6,23,0.95)_50%,rgba(5,18,52,0.97)_100%)]" />
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_24%_24%,rgba(148,163,184,0.14),transparent_40%),radial-gradient(circle_at_82%_84%,rgba(96,165,250,0.16),transparent_42%)] dark:bg-[radial-gradient(circle_at_24%_24%,rgba(59,130,246,0.16),transparent_40%),radial-gradient(circle_at_82%_84%,rgba(99,102,241,0.2),transparent_42%)]" />
-      <div className="pointer-events-none absolute inset-0 opacity-25 [background:linear-gradient(rgba(148,163,184,0.12)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.12)_1px,transparent_1px)] [background-size:44px_44px] dark:opacity-12" />
-
-      <motion.div
-        className="pointer-events-none absolute -left-10 top-32 h-72 w-72 rounded-full bg-sky-300/24 blur-[120px] dark:bg-blue-500/24"
-        animate={{ x: [0, 24, 0], y: [0, 16, 0], scale: [1, 1.06, 1] }}
-        transition={{ duration: 12, repeat: Infinity, ease: "easeInOut" }}
+    <section style={{ position: "relative", paddingTop: 156, paddingBottom: 96, overflow: "hidden" }}>
+      <div
+        style={{
+          position: "absolute",
+          top: -120,
+          left: "50%",
+          transform: "translateX(-50%)",
+          width: 1400,
+          height: 700,
+          background: "radial-gradient(60% 60% at 50% 30%, rgba(0,92,230,0.06), transparent 70%)",
+          pointerEvents: "none",
+        }}
       />
-      <motion.div
-        className="pointer-events-none absolute -right-14 bottom-14 h-72 w-72 rounded-full bg-indigo-300/24 blur-[120px] dark:bg-indigo-500/24"
-        animate={{ x: [0, -28, 0], y: [0, -12, 0], scale: [1.04, 1, 1.04] }}
-        transition={{ duration: 14, repeat: Infinity, ease: "easeInOut" }}
+      <div
+        style={{
+          position: "absolute",
+          top: 80,
+          left: "50%",
+          transform: "translateX(-50%)",
+          width: 1400,
+          height: 500,
+          background: "radial-gradient(40% 50% at 50% 50%, rgba(10,10,12,0.04), transparent 70%)",
+          pointerEvents: "none",
+        }}
       />
 
-      <motion.div className="relative mx-auto max-w-3xl text-center" variants={staggerContainer} initial="hidden" animate="visible">
-        <motion.div variants={fadeInUp} transition={transition} className="inline-flex items-center gap-2 rounded-full border border-slate-300/70 bg-white/70 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-600 backdrop-blur dark:border-slate-700/70 dark:bg-slate-900/55 dark:text-slate-300">
-          <span className="h-2 w-2 rounded-full bg-emerald-500" />
-          Secure Video Conferencing
-        </motion.div>
+      <div style={{ position: "relative", maxWidth: 1180, margin: "0 auto", padding: "0 28px", textAlign: "center" }}>
+        <div
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "7px 14px 7px 12px",
+            background: "var(--sm-bg-elev-1)",
+            borderRadius: 999,
+            boxShadow: "inset 0 0 0 1px var(--sm-line), 0 1px 2px rgba(10,10,12,0.04)",
+            fontSize: 12.5,
+            fontWeight: 500,
+            color: "var(--sm-fg-muted)",
+            letterSpacing: "-0.005em",
+            whiteSpace: "nowrap",
+          }}
+        >
+          <span
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              paddingRight: 10,
+              borderRight: "1px solid var(--sm-line)",
+              color: "var(--sm-fg)",
+              fontWeight: 600,
+            }}
+          >
+            <span style={{ width: 7, height: 7, borderRadius: 999, background: "var(--sm-success)" }} />
+            New
+          </span>
+          End-to-end encrypted by default
+        </div>
 
-        <motion.h1 variants={fadeInUp} transition={transition} className="mt-8 text-5xl font-semibold tracking-tight text-slate-900 sm:text-6xl lg:text-7xl dark:text-slate-100">
+        <h1
+          style={{
+            margin: "32px auto 0",
+            maxWidth: 1000,
+            fontFamily: "var(--sm-font-display)",
+            fontSize: "clamp(56px, 8.6vw, 104px)",
+            fontWeight: 600,
+            letterSpacing: "-0.045em",
+            lineHeight: 0.98,
+            color: "var(--sm-fg)",
+          }}
+        >
           Meetings that stay
-          <span className="block bg-gradient-to-r from-blue-700 via-indigo-700 to-slate-900 bg-clip-text text-transparent dark:from-blue-300 dark:via-indigo-300 dark:to-slate-100">
+          <br />
+          <span
+            style={{
+              background: "linear-gradient(180deg, var(--sm-fg) 30%, var(--sm-fg-subtle) 100%)",
+              WebkitBackgroundClip: "text",
+              backgroundClip: "text",
+              color: "transparent",
+            }}
+          >
             between you.
           </span>
-        </motion.h1>
+        </h1>
 
-        <motion.p variants={fadeInUp} transition={transition} className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-slate-600 sm:text-xl dark:text-slate-300">
-          End-to-end encrypted video calls, host-controlled access, and rooms
-          that expire. No recordings. No compromises.
-        </motion.p>
+        <p
+          style={{
+            margin: "28px auto 0",
+            maxWidth: 600,
+            fontSize: 19,
+            lineHeight: 1.5,
+            color: "var(--sm-fg-muted)",
+            letterSpacing: "-0.005em",
+          }}
+        >
+          End-to-end encrypted video, host-approved access, and rooms that vanish when you're done. No recordings.
+          No transcripts. No compromises.
+        </p>
 
-        <motion.div variants={fadeInUp} transition={transition} className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
-          <Link
-            to="/register"
-            className="inline-flex h-12 items-center justify-center rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-9 text-base font-semibold text-white shadow-[0_18px_38px_-20px_rgba(59,130,246,0.75)] transition duration-200 hover:from-blue-500 hover:to-indigo-500"
+        <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap", marginTop: 36 }}>
+          <LandingButton variant="primary" size="lg" icon="arrow" as="link" to="/register">
+            Start a meeting
+          </LandingButton>
+          <LandingButton variant="secondary" size="lg" as="anchor" href="#features">
+            Watch the demo
+          </LandingButton>
+        </div>
+        <p style={{ marginTop: 16, fontSize: 12.5, color: "var(--sm-fg-subtle)" }}>
+          Free for up to 10 participants · No credit card · 2-hour rooms
+        </p>
+
+        <div
+          style={{
+            marginTop: 88,
+            position: "relative",
+            transform: `translateY(${parY}px)`,
+            transition: "transform 80ms linear",
+          }}
+        >
+          <div
+            style={{
+              position: "absolute",
+              left: "8%",
+              right: "8%",
+              bottom: -60,
+              height: 120,
+              background: "radial-gradient(50% 100% at 50% 0%, rgba(10,10,12,0.18), transparent 70%)",
+              filter: "blur(20px)",
+              pointerEvents: "none",
+            }}
+          />
+          <div
+            style={{
+              position: "relative",
+              margin: "0 auto",
+              maxWidth: 1180,
+              aspectRatio: "1080 / 620",
+              borderRadius: 28,
+              overflow: "hidden",
+              background: "#0A0A0C",
+              boxShadow:
+                "0 60px 140px -40px rgba(10,10,12,0.45), 0 24px 50px -16px rgba(10,10,12,0.20), inset 0 0 0 1px rgba(255,255,255,0.06)",
+            }}
           >
-            Get Started
-          </Link>
-          <Link
-            to="/login"
-            className="inline-flex h-12 items-center justify-center rounded-xl border border-slate-300 bg-white/90 px-9 text-base font-medium text-slate-700 transition duration-200 hover:border-slate-400 hover:bg-white dark:border-slate-700 dark:bg-slate-900/85 dark:text-slate-200 dark:hover:border-slate-600 dark:hover:bg-slate-800"
+            <ProductPreview />
+          </div>
+          <div
+            style={{
+              marginTop: 24,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 24,
+              flexWrap: "wrap",
+              fontSize: 12.5,
+              color: "var(--sm-fg-subtle)",
+              letterSpacing: "-0.005em",
+            }}
           >
-            Sign in
-          </Link>
-        </motion.div>
-
-        <motion.p variants={fadeInUp} transition={transition} className="mt-5 text-xs text-slate-500 dark:text-slate-400">
-          No credit card required
-        </motion.p>
-
-        <motion.div variants={fadeInUp} transition={transition} className="mx-auto mt-10 flex max-w-xl flex-wrap items-center justify-center gap-3 text-xs font-medium text-slate-600 dark:text-slate-300">
-          <span className="rounded-full border border-slate-300/80 bg-white/80 px-3 py-1.5 dark:border-slate-700 dark:bg-slate-900/65">AES + RSA encryption</span>
-          <span className="rounded-full border border-slate-300/80 bg-white/80 px-3 py-1.5 dark:border-slate-700 dark:bg-slate-900/65">No recordings</span>
-          <span className="rounded-full border border-slate-300/80 bg-white/80 px-3 py-1.5 dark:border-slate-700 dark:bg-slate-900/65">Auto-expiring rooms</span>
-        </motion.div>
-      </motion.div>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <LandingIcon name="lock" size={13} /> RSA + AES, on device
+            </span>
+            <span style={{ width: 3, height: 3, borderRadius: 999, background: "var(--sm-line-strong)" }} />
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <LandingIcon name="clock" size={13} /> Rooms expire in 2 hours
+            </span>
+            <span style={{ width: 3, height: 3, borderRadius: 999, background: "var(--sm-line-strong)" }} />
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <LandingIcon name="shield" size={13} /> Zero data retention
+            </span>
+          </div>
+        </div>
+      </div>
     </section>
   );
 }
-
-export default HeroSection;

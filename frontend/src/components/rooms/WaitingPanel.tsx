@@ -1,4 +1,5 @@
 import { type RoomPresenceUser } from "../../hooks/useRoomSocket";
+import { SmButton, SmIcon } from "../sm";
 
 const getPresenceUserLabel = (user: RoomPresenceUser): string => {
   if (user.label.trim()) {
@@ -10,6 +11,12 @@ const getPresenceUserLabel = (user: RoomPresenceUser): string => {
   }
 
   return "Unknown user";
+};
+
+const initialsFor = (value: string): string => {
+  const parts = value.trim().split(/\s+/).filter(Boolean).slice(0, 2);
+  if (!parts.length) return "?";
+  return parts.map((p) => p.charAt(0).toUpperCase()).join("");
 };
 
 type WaitingPanelProps = {
@@ -28,17 +35,56 @@ const WaitingPanel = ({
   onReject,
 }: WaitingPanelProps) => {
   return (
-    <div className="space-y-3">
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       {hostActionError ? (
-        <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/50 dark:text-red-300">
+        <div
+          role="alert"
+          style={{
+            padding: "10px 12px",
+            borderRadius: 12,
+            background: "var(--sm-danger-soft)",
+            color: "var(--sm-danger)",
+            fontSize: 13,
+          }}
+        >
           {hostActionError}
-        </p>
+        </div>
       ) : null}
 
       {waitingUsers.length === 0 ? (
-        <p className="text-sm text-slate-600 dark:text-slate-300">No one is waiting for approval.</p>
+        <div
+          style={{
+            padding: "32px 16px",
+            borderRadius: 20,
+            background: "var(--sm-bg-sunken)",
+            color: "var(--sm-fg-muted)",
+            fontSize: 13.5,
+            textAlign: "center",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <span
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 999,
+              background: "#fff",
+              color: "var(--sm-fg-subtle)",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              boxShadow: "var(--sm-shadow-xs)",
+            }}
+          >
+            <SmIcon name="users" size={16} />
+          </span>
+          No one is waiting for approval.
+        </div>
       ) : (
-        <ul className="space-y-2">
+        <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 10 }}>
           {waitingUsers.map((user) => {
             const userLabel = getPresenceUserLabel(user);
             const userId = user.userId;
@@ -47,26 +93,68 @@ const WaitingPanel = ({
             return (
               <li
                 key={userId !== null ? String(userId) : userLabel}
-                className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 10,
+                  padding: "12px 14px",
+                  borderRadius: 16,
+                  background: "var(--sm-bg-sunken)",
+                }}
               >
-                <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{userLabel}</p>
-                <div className="mt-2 flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => onApprove(userId)}
-                    disabled={!canModerate || hasHostActionPending}
-                    className="inline-flex h-9 items-center justify-center rounded-lg border border-emerald-300 bg-emerald-50 px-3 text-xs font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-900/40 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-950/60"
+                <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                  <span
+                    style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: 999,
+                      background: "var(--sm-fg)",
+                      color: "#F5F5F7",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      flexShrink: 0,
+                    }}
                   >
-                    Approve
-                  </button>
-                  <button
-                    type="button"
+                    {initialsFor(userLabel)}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 13.5,
+                      fontWeight: 500,
+                      color: "var(--sm-fg)",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {userLabel}
+                  </span>
+                </div>
+                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                  <SmButton
+                    variant="ghost"
+                    size="sm"
                     onClick={() => onReject(userId)}
                     disabled={!canModerate || hasHostActionPending}
-                    className="inline-flex h-9 items-center justify-center rounded-lg border border-red-300 bg-red-50 px-3 text-xs font-medium text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/60"
+                    style={{
+                      background: "var(--sm-danger-soft)",
+                      color: "var(--sm-danger)",
+                    }}
                   >
-                    Reject
-                  </button>
+                    Deny
+                  </SmButton>
+                  <SmButton
+                    variant="primary"
+                    size="sm"
+                    onClick={() => onApprove(userId)}
+                    disabled={!canModerate || hasHostActionPending}
+                  >
+                    Admit
+                  </SmButton>
                 </div>
               </li>
             );

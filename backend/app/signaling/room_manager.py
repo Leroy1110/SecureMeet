@@ -20,6 +20,7 @@ class RoomState:
     waiting_ws: dict[int, WebSocket]
     active_ws: dict[int, WebSocket]
     pending_disconnects: dict[int, PendingDisconnect]
+    screen_sharer_user_id: int | None
 
     def __init__(self):
         self.host_ws = None
@@ -27,6 +28,7 @@ class RoomState:
         self.waiting_ws = dict()
         self.active_ws = dict()
         self.pending_disconnects = dict()
+        self.screen_sharer_user_id = None
 
     def get_waiting_user_ids(self) -> list[int]:
         waiting_user_ids = list(self.waiting_ws.keys())

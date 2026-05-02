@@ -1,42 +1,85 @@
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import SmLogo from "../../sm/SmLogo";
+import type { LandingTheme } from "../hooks/useLandingTheme";
+import { LandingButton } from "../shared/LandingButton";
+import { ThemeToggle } from "../shared/ThemeToggle";
 
-type LandingNavbarProps = {
-  scrolled: boolean;
-};
+export function LandingNavbar({
+  theme,
+  setTheme,
+}: {
+  theme: LandingTheme;
+  setTheme: (theme: LandingTheme) => void;
+}) {
+  const [scrolled, setScrolled] = useState(false);
 
-function LandingNavbar({ scrolled }: LandingNavbarProps) {
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 12);
+    window.addEventListener("scroll", onScroll);
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
   return (
-    <nav
-      className={`sticky top-2 z-50 mx-auto flex max-w-6xl items-center justify-between rounded-2xl border px-5 py-3 backdrop-blur-xl transition-all duration-300 ${
-        scrolled
-          ? "border-slate-300/80 bg-white/90 shadow-[0_16px_45px_-28px_rgba(15,23,42,0.5)] dark:border-slate-700/80 dark:bg-slate-900/88 dark:shadow-[0_16px_45px_-26px_rgba(0,0,0,0.7)]"
-          : "border-slate-200/80 bg-white/75 shadow-[0_10px_30px_-24px_rgba(15,23,42,0.45)] dark:border-slate-700/70 dark:bg-slate-900/72 dark:shadow-[0_14px_36px_-26px_rgba(0,0,0,0.65)]"
-      }`}
+    <header
       style={{
-        marginLeft: "max(1rem, calc((100% - 72rem) / 2))",
-        marginRight: "max(1rem, calc((100% - 72rem) / 2))",
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
+        zIndex: 50,
+        transition: "all 360ms cubic-bezier(0.32, 0.72, 0, 1)",
+        padding: scrolled ? "10px 24px" : "18px 24px",
       }}
     >
-      <p className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-600 dark:text-slate-300">
-        <span className="h-2 w-2 rounded-full bg-blue-500 shadow-[0_0_0_4px_rgba(59,130,246,0.16)] dark:bg-blue-400 dark:shadow-[0_0_0_4px_rgba(96,165,250,0.2)]" />
-        SecureMeet
-      </p>
-      <div className="flex items-center gap-2 sm:gap-3">
-        <Link
-          to="/login"
-          className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-300 bg-white/90 px-4 text-sm font-medium text-slate-700 transition duration-200 hover:border-slate-400 hover:bg-white dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-slate-600 dark:hover:bg-slate-800"
+      <div
+        style={{
+          maxWidth: 1180,
+          margin: "0 auto",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "10px 18px 10px 22px",
+          background: scrolled ? "var(--sm-bg-elev-2)" : "transparent",
+          backdropFilter: scrolled ? "var(--sm-blur-md)" : "none",
+          WebkitBackdropFilter: scrolled ? "var(--sm-blur-md)" : "none",
+          borderRadius: 999,
+          boxShadow: scrolled
+            ? "inset 0 0 0 1px var(--sm-line), 0 12px 32px -12px rgba(10,10,12,0.10)"
+            : "none",
+          transition: "all 360ms cubic-bezier(0.32, 0.72, 0, 1)",
+        }}
+      >
+        <SmLogo size={26} />
+        <nav
+          style={{
+            display: "flex",
+            gap: 28,
+            fontSize: 13.5,
+            fontWeight: 500,
+            color: "var(--sm-fg-muted)",
+            letterSpacing: "-0.005em",
+          }}
         >
-          Sign in
-        </Link>
-        <Link
-          to="/register"
-          className="inline-flex h-10 items-center justify-center rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 text-sm font-semibold text-white shadow-[0_14px_30px_-18px_rgba(59,130,246,0.75)] transition duration-200 hover:from-blue-500 hover:to-indigo-500 dark:from-blue-500 dark:to-indigo-500"
-        >
-          Get Started
-        </Link>
+          <a href="#features" style={{ color: "inherit", textDecoration: "none" }}>
+            Features
+          </a>
+          <a href="#security" style={{ color: "inherit", textDecoration: "none" }}>
+            Security
+          </a>
+          <a href="#" style={{ color: "inherit", textDecoration: "none" }}>
+            Changelog
+          </a>
+        </nav>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <ThemeToggle theme={theme} setTheme={setTheme} />
+          <LandingButton variant="ghost" size="sm" as="link" to="/login">
+            Sign in
+          </LandingButton>
+          <LandingButton variant="primary" size="sm" as="link" to="/register">
+            Start free
+          </LandingButton>
+        </div>
       </div>
-    </nav>
+    </header>
   );
 }
-
-export default LandingNavbar;

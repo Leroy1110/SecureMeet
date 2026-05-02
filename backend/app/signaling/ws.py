@@ -463,6 +463,8 @@ async def _finalize_disconnect_after_grace(
     if room_state is None:
         return
 
+    await _clear_screen_share_if_sharer(room_state, user_id)
+
     if finalized_disconnect.role == "host" and room_state.host_user_id == user_id:
         await _broadcast_host_removed(room_state, user_id)
     elif finalized_disconnect.state == "waiting":
@@ -701,6 +703,200 @@ async def handler_webrtc_ice_candidate(
         payload=payload,
         relay_payload={"candidate": normalized_candidate},
     )
+
+
+async def _broadcast_screen_share_state(room_state: RoomState):
+    message = {
+        "type": "screen.share.state",
+        "payload": {"user_id": room_state.screen_sharer_user_id},
+    }
+
+    for ws_active in room_state.active_ws.values():
+        try:
+            await ws_active.send_json(message)
+        except Exception:
+            pass
+
+    if room_state.host_ws is not None:
+        try:
+            await room_state.host_ws.send_json(message)
+        except Exception:
+            pass
+
+
+async def _clear_screen_share_if_sharer(room_state: RoomState, user_id: int):
+    if room_state.screen_sharer_user_id != user_id:
+        return
+    room_state.screen_sharer_user_id = None
+    await _broadcast_screen_share_state(room_state)
+
+
+async def handler_screen_share_start(
+    websocket: WebSocket,
+    room_state: RoomState,
+    room_code: str,
+    room_id: int,
+    sender_user_id: int,
+    sender_role: str,
+    payload: dict,
+    db: Session
+):
+    del payload
+
+    if not _can_send_webrtc_signaling(
+        room_state=room_state,
+        sender_user_id=sender_user_id,
+        sender_role=sender_role,
+    ):
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "only host or active users can start screen share"
+            }
+        })
+        return
+
+    current_sharer = room_state.screen_sharer_user_id
+    if current_sharer is not None and current_sharer != sender_user_id:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "another user is currently sharing their screen"
+            }
+        })
+        return
+
+    if current_sharer == sender_user_id:
+        return
+
+    room_state.screen_sharer_user_id = sender_user_id
+    await _broadcast_screen_share_state(room_state)
+
+    try:
+        log_event(
+            db=db,
+            event_type="SCREEN_SHARE_START",
+            room_id=room_id,
+            user_id=sender_user_id,
+            data={"room_code": room_code},
+        )
+    except Exception:
+        pass
+
+
+async def handler_screen_share_stop(
+    websocket: WebSocket,
+    room_state: RoomState,
+    room_code: str,
+    room_id: int,
+    sender_user_id: int,
+    sender_role: str,
+    payload: dict,
+    db: Session
+):
+    del payload
+
+    if not _can_send_webrtc_signaling(
+        room_state=room_state,
+        sender_user_id=sender_user_id,
+        sender_role=sender_role,
+    ):
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "only host or active users can stop screen share"
+            }
+        })
+        return
+
+    if room_state.screen_sharer_user_id != sender_user_id:
+        return
+
+    room_state.screen_sharer_user_id = None
+    await _broadcast_screen_share_state(room_state)
+
+    try:
+        log_event(
+            db=db,
+            event_type="SCREEN_SHARE_STOP",
+            room_id=room_id,
+            user_id=sender_user_id,
+            data={"room_code": room_code},
+        )
+    except Exception:
+        pass
+
+
+async def handler_host_screen_stop(
+    websocket: WebSocket,
+    room_state: RoomState,
+    room_code: str,
+    room_id: int,
+    sender_user_id: int,
+    sender_role: str,
+    payload: dict,
+    db: Session
+):
+    del sender_role
+
+    if room_state.host_user_id != sender_user_id:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "only host can stop another user's screen share"
+            }
+        })
+        return
+
+    try:
+        target_user_id = int(payload.get("user_id"))
+    except (TypeError, ValueError):
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "invalid user_id in payload"
+            }
+        })
+        return
+
+    if room_state.screen_sharer_user_id != target_user_id:
+        await websocket.send_json({
+            "type": "error",
+            "payload": {
+                "message": "target user is not currently sharing"
+            }
+        })
+        return
+
+    target_ws = _resolve_active_recipient_ws(
+        room_state=room_state,
+        recipient_user_id=target_user_id,
+    )
+    if target_ws is not None:
+        try:
+            await target_ws.send_json({
+                "type": "screen.share.force_stop",
+                "payload": {},
+            })
+        except Exception:
+            pass
+
+    room_state.screen_sharer_user_id = None
+    await _broadcast_screen_share_state(room_state)
+
+    try:
+        log_event(
+            db=db,
+            event_type="SCREEN_SHARE_FORCE_STOP",
+            room_id=room_id,
+            user_id=sender_user_id,
+            data={
+                "room_code": room_code,
+                "target_user_id": target_user_id,
+            },
+        )
+    except Exception:
+        pass
 
 
 async def handler_approve(
@@ -1337,6 +1533,8 @@ async def handler_kick(
         }
     )
 
+    await _clear_screen_share_if_sharer(room_state, payload_user_id)
+
     if result_state_ws == "waiting":
         if room_state.host_ws is not None:
             try:
@@ -1598,6 +1796,9 @@ MESSAGE_HANDLERS = {
     "webrtc.ice_candidate": handler_webrtc_ice_candidate,
     "host.transfer": handler_host_transfer,
     "room.end": handler_room_end,
+    "screen.share.start": handler_screen_share_start,
+    "screen.share.stop": handler_screen_share_stop,
+    "host.screen.stop": handler_host_screen_stop,
 }
 
 
@@ -1909,6 +2110,7 @@ async def websocket_endpoint(
                     "role": role,
                     "state": "active",
                     "user": _serialize_user(db, room_id, user_id),
+                    "screen_sharer_user_id": room_state.screen_sharer_user_id,
                 }
             })
 
@@ -1966,6 +2168,7 @@ async def websocket_endpoint(
                     "role": role,
                     "state": "active",
                     "user": _serialize_user(db, room_id, user_id),
+                    "screen_sharer_user_id": room_state.screen_sharer_user_id,
                 }
             })
             await websocket.send_json({
@@ -2096,6 +2299,8 @@ async def websocket_endpoint(
                         )
                     except Exception:
                         pass
+
+                    await _clear_screen_share_if_sharer(room_state, user_id)
 
                     if role == "host" and room_state.host_user_id == user_id:
                         await _broadcast_host_removed(room_state, user_id)

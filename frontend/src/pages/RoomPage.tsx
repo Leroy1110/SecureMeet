@@ -11,6 +11,7 @@ import type { LocalMediaUiState, MeshUiState } from "../components/rooms/types";
 import WaitingPanel from "../components/rooms/WaitingPanel";
 import { useLocalMedia } from "../hooks/useLocalMedia";
 import { type QueuedWebRtcSignal, type SessionStatus, useRoomSocket } from "../hooks/useRoomSocket";
+import { useScreenShare } from "../hooks/useScreenShare";
 import { useWebRtcPeers } from "../hooks/useWebRtcPeers";
 import { ROOM_MEDIA_TOPOLOGY } from "../lib/mediaTopology";
 import { getRoomEntryPreferences } from "../lib/roomEntryPreferences";
@@ -97,6 +98,8 @@ function RoomPage() {
     lastMessageType,
     queuedWebRtcSignals,
     localUserId,
+    screenSharerUserId,
+    forceStopScreenShareNonce,
     normalizedRoomCode,
     role,
     roomState,
@@ -104,9 +107,12 @@ function RoomPage() {
     consumeWebRtcSignal,
     sendChatMessage,
     sendHostKickAction,
+    sendHostScreenStop,
     sendHostTransfer,
     sendHostWaitingAction,
     sendEndMeeting,
+    sendScreenShareStart,
+    sendScreenShareStop,
     sendWebRtcAnswer,
     sendWebRtcIceCandidate,
     sendWebRtcOffer,
@@ -126,7 +132,6 @@ function RoomPage() {
   const audioEnabled = roomEntryPreferences?.audioEnabled ?? true;
   const videoEnabled = roomEntryPreferences?.videoEnabled ?? true;
   const shouldStartLocalMedia = role === "host" || sessionStatus === "active";
-  const preferencesMediaDisabled = !audioEnabled && !videoEnabled;
 
   const processingSignalPeersRef = useRef<Set<number>>(new Set());
   const pendingOfferInitiationsRef = useRef<Set<number>>(new Set());
@@ -143,8 +148,17 @@ function RoomPage() {
     mediaError,
     mediaReady,
     mediaDisabled,
+    audioMuted,
+    videoOff,
+    hasAudioDevice,
+    hasVideoDevice,
     startLocalMedia,
     stopLocalMedia,
+    setAudioMuted,
+    setVideoOff,
+    replaceLocalVideoTrack,
+    restoreCameraTrack,
+    getCameraVideoTrack,
   } = useLocalMedia();
 
   const {
@@ -160,7 +174,34 @@ function RoomPage() {
     hasInitiatedOffer,
     markAwaitingAnswer,
     isAwaitingAnswer,
+    replaceVideoTrackForAllPeers,
   } = useWebRtcPeers();
+
+  const {
+    isSharing: isScreenSharing,
+    canShareScreen,
+    screenShareError,
+    startScreenShare,
+    stopScreenShare,
+  } = useScreenShare({
+    replaceVideoTrackForAllPeers,
+    replaceLocalVideoTrack,
+    restoreCameraTrack,
+    sendScreenShareStart,
+    sendScreenShareStop,
+    forceStopScreenShareNonce,
+  });
+  const closeAllPeerConnectionsRef = useRef(closeAllPeerConnections);
+  const stopLocalMediaRef = useRef(stopLocalMedia);
+  const stopScreenShareRef = useRef(stopScreenShare);
+
+  const isAnotherUserSharing = screenSharerUserId !== null && screenSharerUserId !== localUserId;
+  const canStartScreenShare =
+    canShareScreen &&
+    canSendWebRtc &&
+    isSocketOpen &&
+    shouldStartLocalMedia &&
+    !isFinalState;
 
   const buildIceCandidateHandler = useCallback(
     (targetUserId: number) => {
@@ -179,7 +220,18 @@ function RoomPage() {
     [sendWebRtcIceCandidate]
   );
 
-  const hasLocalVideoTrack = Boolean(localStream?.getVideoTracks().length);
+  const localCameraTrack = getCameraVideoTrack();
+  const localCameraPreviewStream = useMemo(() => {
+    if (!localCameraTrack) {
+      return null;
+    }
+    return new MediaStream([localCameraTrack]);
+  }, [localCameraTrack]);
+  const hasLocalVideoTrack = Boolean(
+    localCameraTrack &&
+      localCameraTrack.enabled &&
+      localCameraTrack.readyState === "live"
+  );
   const hasLocalAudioTrack = Boolean(localStream?.getAudioTracks().length);
 
   const displayedRtcError = rtcFlowError;
@@ -203,27 +255,42 @@ function RoomPage() {
       return "not_started";
     }
 
-    if (mediaDisabled || preferencesMediaDisabled) {
-      return "disabled_by_preferences";
-    }
-
     if (mediaLoading) {
       return "requesting_permissions";
     }
 
-    if (mediaError) {
+    if (mediaDisabled) {
+      return "failed";
+    }
+
+    if (mediaError && !hasLocalAudioTrack && !hasLocalVideoTrack) {
       return "failed";
     }
 
     if (hasLocalAudioTrack && hasLocalVideoTrack) {
+      if (audioMuted && videoOff) {
+        return "disabled_by_preferences";
+      }
+      if (videoOff) {
+        return "ready_audio_only";
+      }
+      if (audioMuted) {
+        return "ready_video_only";
+      }
       return "ready_audio_video";
     }
 
     if (hasLocalAudioTrack) {
+      if (audioMuted) {
+        return "disabled_by_preferences";
+      }
       return "ready_audio_only";
     }
 
     if (hasLocalVideoTrack) {
+      if (videoOff) {
+        return "disabled_by_preferences";
+      }
       return "ready_video_only";
     }
 
@@ -239,8 +306,9 @@ function RoomPage() {
     mediaError,
     mediaLoading,
     mediaReady,
-    preferencesMediaDisabled,
+    audioMuted,
     shouldStartLocalMedia,
+    videoOff,
   ]);
 
   const hasRtcNegotiationPrerequisites = useMemo(() => {
@@ -256,7 +324,7 @@ function RoomPage() {
       return false;
     }
 
-    if (preferencesMediaDisabled || mediaDisabled || mediaReady || Boolean(mediaError)) {
+    if (mediaDisabled || mediaReady || Boolean(mediaError)) {
       return true;
     }
 
@@ -270,7 +338,6 @@ function RoomPage() {
     mediaError,
     mediaLoading,
     mediaReady,
-    preferencesMediaDisabled,
     shouldStartLocalMedia,
   ]);
 
@@ -363,10 +430,11 @@ function RoomPage() {
   const doLeaveRoom = useCallback(() => {
     resetMeshFlowState();
     closeAllPeerConnections();
+    stopScreenShare();
     stopLocalMedia();
     leaveRoom();
     navigate("/dashboard", { replace: true });
-  }, [closeAllPeerConnections, leaveRoom, navigate, resetMeshFlowState, stopLocalMedia]);
+  }, [closeAllPeerConnections, leaveRoom, navigate, resetMeshFlowState, stopLocalMedia, stopScreenShare]);
 
   const handleLeaveRoom = useCallback(() => {
     if (isHost && !isFinalState) {
@@ -390,9 +458,39 @@ function RoomPage() {
     setIsHostLeaveDialogOpen(false);
     resetMeshFlowState();
     closeAllPeerConnections();
+    stopScreenShare();
     stopLocalMedia();
     sendEndMeeting();
-  }, [closeAllPeerConnections, resetMeshFlowState, sendEndMeeting, stopLocalMedia]);
+  }, [closeAllPeerConnections, resetMeshFlowState, sendEndMeeting, stopLocalMedia, stopScreenShare]);
+
+  const handleToggleMute = useCallback(() => {
+    setAudioMuted(!audioMuted);
+  }, [audioMuted, setAudioMuted]);
+
+  const handleToggleCamera = useCallback(() => {
+    const nextVideoOff = !videoOff;
+    setVideoOff(nextVideoOff);
+
+    if (isScreenSharing) {
+      return;
+    }
+
+    if (nextVideoOff) {
+      replaceVideoTrackForAllPeers(null);
+      return;
+    }
+
+    const cameraTrack = restoreCameraTrack();
+    replaceVideoTrackForAllPeers(cameraTrack?.enabled ? cameraTrack : null);
+  }, [isScreenSharing, replaceVideoTrackForAllPeers, restoreCameraTrack, setVideoOff, videoOff]);
+
+  const handleToggleScreenShare = useCallback(() => {
+    if (isScreenSharing) {
+      stopScreenShare();
+      return;
+    }
+    void startScreenShare();
+  }, [isScreenSharing, startScreenShare, stopScreenShare]);
 
   const handleMakeHost = useCallback((userId: number) => {
     sendHostTransfer(userId);
@@ -414,10 +512,27 @@ function RoomPage() {
   }, [audioEnabled, shouldStartLocalMedia, startLocalMedia, stopLocalMedia, videoEnabled]);
 
   useEffect(() => {
+    if (shouldStartLocalMedia) {
+      return;
+    }
+
+    stopScreenShare();
+  }, [shouldStartLocalMedia, stopScreenShare]);
+
+  useEffect(() => {
     if (isFinalState && activePanel !== null) {
       setActivePanel(null);
     }
   }, [activePanel, isFinalState]);
+
+  useEffect(() => {
+    if (!isScreenSharing) {
+      return;
+    }
+    if (screenSharerUserId !== null && screenSharerUserId !== localUserId) {
+      stopScreenShare();
+    }
+  }, [isScreenSharing, localUserId, screenSharerUserId, stopScreenShare]);
 
   useEffect(() => {
     if (pendingLeaveAfterTransferRef.current && !isHost) {
@@ -427,15 +542,29 @@ function RoomPage() {
   }, [doLeaveRoom, isHost]);
 
   useEffect(() => {
+    closeAllPeerConnectionsRef.current = closeAllPeerConnections;
+  }, [closeAllPeerConnections]);
+
+  useEffect(() => {
+    stopLocalMediaRef.current = stopLocalMedia;
+  }, [stopLocalMedia]);
+
+  useEffect(() => {
+    stopScreenShareRef.current = stopScreenShare;
+  }, [stopScreenShare]);
+
+  useEffect(() => {
     const processingSignalPeers = processingSignalPeersRef.current;
     const pendingOfferInitiations = pendingOfferInitiationsRef.current;
+
     return () => {
       processingSignalPeers.clear();
       pendingOfferInitiations.clear();
-      closeAllPeerConnections();
-      stopLocalMedia();
+      closeAllPeerConnectionsRef.current();
+      stopScreenShareRef.current();
+      stopLocalMediaRef.current();
     };
-  }, [closeAllPeerConnections, stopLocalMedia]);
+  }, []);
 
   useEffect(() => {
     const pendingIceCandidateUserIds = getUsersWithPendingRemoteIceCandidates();
@@ -499,7 +628,7 @@ function RoomPage() {
           existingSnapshot.connectionState === "disconnected");
 
       if (existingSnapshot && !isStale) {
-        // Healthy entry (new / connecting / connected) — skip.
+        // Healthy entry (new / connecting / connected) - skip.
         continue;
       }
 
@@ -770,9 +899,40 @@ function RoomPage() {
 
   const sessionContent = getSessionStateContent(sessionStatus);
 
+  const alertStyle: React.CSSProperties = {
+    padding: "12px 14px",
+    borderRadius: 16,
+    fontSize: 13.5,
+    border: "1px solid rgba(255,255,255,0.08)",
+    background: "rgba(198,48,31,0.14)",
+    color: "#FF7A6B",
+  };
+
+  const warningStyle: React.CSSProperties = {
+    ...alertStyle,
+    background: "rgba(180,112,10,0.18)",
+    color: "#F6C685",
+  };
+
   return (
-    <div className="min-h-screen bg-slate-50 pb-4 dark:bg-slate-950">
-      <div className="mx-auto max-w-7xl space-y-4 px-4 py-4 sm:px-6 sm:py-6">
+    <div
+      style={{
+        minHeight: "100vh",
+        background: "var(--sm-stage)",
+        color: "var(--sm-stage-fg)",
+        paddingBottom: 16,
+      }}
+    >
+      <div
+        style={{
+          maxWidth: 1280,
+          margin: "0 auto",
+          padding: "18px 20px 0",
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+        }}
+      >
         <RoomHeader
           roomCode={normalizedRoomCode}
           displayName={displayName}
@@ -782,27 +942,41 @@ function RoomPage() {
           onLeave={handleLeaveRoom}
         />
 
-        {displayedError ? (
-          <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/50 dark:text-red-300">
-            {displayedError}
-          </p>
-        ) : null}
+        {displayedError ? <p role="alert" style={alertStyle}>{displayedError}</p> : null}
 
-        {mediaError ? (
-          <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/50 dark:text-amber-300">
-            {mediaError}
-          </p>
-        ) : null}
+        {mediaError ? <p role="alert" style={warningStyle}>{mediaError}</p> : null}
+        {screenShareError ? <p role="alert" style={warningStyle}>{screenShareError}</p> : null}
 
-        {displayedRtcError ? (
-          <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/50 dark:text-red-300">
-            {displayedRtcError}
-          </p>
-        ) : null}
+        {displayedRtcError ? <p role="alert" style={alertStyle}>{displayedRtcError}</p> : null}
 
-        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-          <h2 className="text-sm font-semibold tracking-tight text-slate-900 dark:text-slate-100">{sessionContent.title}</h2>
-          <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{sessionContent.description}</p>
+        <div
+          style={{
+            padding: "12px 16px",
+            borderRadius: 18,
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(255,255,255,0.06)",
+          }}
+        >
+          <h2
+            style={{
+              margin: 0,
+              fontSize: 13.5,
+              fontWeight: 600,
+              color: "var(--sm-stage-fg)",
+              letterSpacing: "-0.01em",
+            }}
+          >
+            {sessionContent.title}
+          </h2>
+          <p
+            style={{
+              margin: "4px 0 0",
+              fontSize: 12.5,
+              color: "var(--sm-stage-muted)",
+            }}
+          >
+            {sessionContent.description}
+          </p>
         </div>
 
         <MeetingStage
@@ -810,51 +984,92 @@ function RoomPage() {
           localUserId={localUserId}
           localDisplayName={displayName}
           localStream={localStream}
+          localCameraPreviewStream={localCameraPreviewStream}
           hasLocalVideoTrack={hasLocalVideoTrack}
           hasLocalAudioTrack={hasLocalAudioTrack}
           localMediaUiState={localMediaUiState}
           peerStates={peerStates}
           meshUiState={meshUiState}
           mediaTopology={ROOM_MEDIA_TOPOLOGY}
+          screenSharerUserId={screenSharerUserId}
         />
 
         {isFinalState ? (
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+          <div
+            style={{
+              padding: 16,
+              borderRadius: 18,
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.06)",
+              display: "flex",
+              justifyContent: "flex-start",
+            }}
+          >
             <button
               type="button"
               onClick={handleLeaveRoom}
-              className="inline-flex h-11 items-center justify-center rounded-xl bg-black px-5 text-sm font-medium text-white transition hover:bg-neutral-800 dark:bg-blue-900 dark:hover:bg-blue-800"
+              className="sm-press"
+              style={{
+                height: 44,
+                padding: "0 22px",
+                borderRadius: 14,
+                border: 0,
+                background: "#F5F5F7",
+                color: "var(--sm-fg)",
+                fontSize: 14,
+                fontWeight: 500,
+                cursor: "pointer",
+                fontFamily: "var(--sm-font-text)",
+              }}
             >
               Return to dashboard
             </button>
           </div>
         ) : null}
 
-        <div className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
+        <div
+          style={{
+            padding: "10px 14px",
+            borderRadius: 14,
+            background: "rgba(255,255,255,0.03)",
+            border: "1px solid rgba(255,255,255,0.05)",
+          }}
+        >
           <button
             type="button"
             onClick={() => setIsDebugOpen((previousValue) => !previousValue)}
-            className="text-xs font-semibold uppercase tracking-[0.15em] text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+            style={{
+              background: "transparent",
+              border: 0,
+              padding: 0,
+              cursor: "pointer",
+              fontSize: 10.5,
+              fontWeight: 600,
+              letterSpacing: "0.14em",
+              textTransform: "uppercase",
+              color: "var(--sm-stage-muted)",
+              fontFamily: "var(--sm-font-text)",
+            }}
           >
-            {isDebugOpen ? "Hide" : "Show"} debug details
+            {isDebugOpen ? "Hide" : "Show"} debug
           </button>
           {isDebugOpen ? (
-            <div className="mt-3 grid gap-2 text-xs text-slate-600 dark:text-slate-300 sm:grid-cols-2 lg:grid-cols-4">
-              <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
-                Last message: {lastMessageType || "None"}
-              </p>
-              <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
-                Room state: {roomState || "Unknown"}
-              </p>
-              <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
-                Mesh peers: {peerStates.size}
-              </p>
-              <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
-                Mesh state: {formatStatusLabel(meshUiState)}
-              </p>
-              <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
-                Topology: {ROOM_MEDIA_TOPOLOGY}
-              </p>
+            <div
+              style={{
+                marginTop: 10,
+                display: "grid",
+                gap: 8,
+                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                fontSize: 11.5,
+                color: "var(--sm-stage-muted)",
+                fontFamily: "var(--sm-font-mono)",
+              }}
+            >
+              <span>Last msg: {lastMessageType || "none"}</span>
+              <span>Room state: {roomState || "unknown"}</span>
+              <span>Mesh peers: {peerStates.size}</span>
+              <span>Mesh: {formatStatusLabel(meshUiState)}</span>
+              <span>Topology: {ROOM_MEDIA_TOPOLOGY}</span>
             </div>
           ) : null}
         </div>
@@ -863,6 +1078,16 @@ function RoomPage() {
           activeCount={activeUsers.length}
           waitingCount={waitingUsers.length}
           isHost={isHost}
+          audioMuted={audioMuted}
+          videoOff={videoOff}
+          isScreenSharing={isScreenSharing}
+          isAnotherUserSharing={isAnotherUserSharing}
+          canStartScreenShare={canStartScreenShare}
+          canToggleMute={hasAudioDevice}
+          canToggleCamera={hasVideoDevice}
+          onToggleMute={handleToggleMute}
+          onToggleCamera={handleToggleCamera}
+          onToggleScreenShare={handleToggleScreenShare}
           onOpenActive={() => setActivePanel("active")}
           onOpenWaiting={() => setActivePanel("waiting")}
           onOpenChat={() => setActivePanel("chat")}
@@ -898,30 +1123,95 @@ function RoomPage() {
           onApprove={(userId) => sendHostWaitingAction("waiting.approve", userId)}
           onReject={(userId) => sendHostWaitingAction("waiting.reject", userId)}
         />
-        <div className="mt-5 border-t border-slate-200 pt-4 dark:border-slate-800">
-          <p className="mb-2 text-sm font-semibold text-slate-900 dark:text-slate-100">Active moderation</p>
-          <ul className="space-y-2">
+        <div
+          style={{
+            marginTop: 20,
+            paddingTop: 16,
+            borderTop: "1px solid var(--sm-line)",
+          }}
+        >
+          <p
+            className="sm-eyebrow"
+            style={{ marginBottom: 10, fontSize: 10.5 }}
+          >
+            Active moderation
+          </p>
+          <ul
+            style={{
+              listStyle: "none",
+              padding: 0,
+              margin: 0,
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+            }}
+          >
             {activeUsers.map((user) => {
               const userId = user.userId;
               const canKick = userId !== null && userId !== localUserId;
+              const isCurrentSharer = userId !== null && userId === screenSharerUserId;
               const userLabel = user.label || (userId !== null ? `User ${userId}` : "Unknown user");
 
               return (
                 <li
                   key={userId !== null ? String(userId) : userLabel}
-                  className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 10,
+                    padding: "10px 14px",
+                    borderRadius: 14,
+                    background: "var(--sm-bg-sunken)",
+                  }}
                 >
-                  <p className="text-sm text-slate-800 dark:text-slate-100">{userLabel}</p>
-                  {canKick ? (
-                    <button
-                      type="button"
-                      onClick={() => sendHostKickAction(userId)}
-                      disabled={hasHostActionPending}
-                      className="inline-flex h-9 items-center justify-center rounded-lg border border-red-300 bg-red-50 px-3 text-xs font-medium text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/60"
-                    >
-                      Kick
-                    </button>
-                  ) : null}
+                  <span style={{ fontSize: 13.5, color: "var(--sm-fg)" }}>{userLabel}</span>
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                    {isCurrentSharer && userId !== null ? (
+                      <button
+                        type="button"
+                        onClick={() => sendHostScreenStop(userId)}
+                        className="sm-press"
+                        style={{
+                          height: 32,
+                          padding: "0 12px",
+                          borderRadius: 10,
+                          border: 0,
+                          background: "rgba(77,156,255,0.22)",
+                          color: "#9CC9FF",
+                          fontSize: 12.5,
+                          fontWeight: 500,
+                          cursor: "pointer",
+                          fontFamily: "var(--sm-font-text)",
+                        }}
+                      >
+                        Stop share
+                      </button>
+                    ) : null}
+                    {canKick ? (
+                      <button
+                        type="button"
+                        onClick={() => sendHostKickAction(userId)}
+                        disabled={hasHostActionPending}
+                        className="sm-press"
+                        style={{
+                          height: 32,
+                          padding: "0 12px",
+                          borderRadius: 10,
+                          border: 0,
+                          background: "var(--sm-danger-soft)",
+                          color: "var(--sm-danger)",
+                          fontSize: 12.5,
+                          fontWeight: 500,
+                          cursor: hasHostActionPending ? "not-allowed" : "pointer",
+                          opacity: hasHostActionPending ? 0.6 : 1,
+                          fontFamily: "var(--sm-font-text)",
+                        }}
+                      >
+                        Remove
+                      </button>
+                    ) : null}
+                  </div>
                 </li>
               );
             })}
